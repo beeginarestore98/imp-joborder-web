@@ -1,0 +1,36 @@
+begin;
+do $$
+declare a uuid; o uuid; m uuid; x uuid; p uuid; j uuid; b uuid; result jsonb; denied boolean;
+begin
+ insert into public.impjo_principals(kind,state,name) values('STAFF','APPROVED','TEST ADMIN') returning id into a;
+ insert into public.impjo_principals(kind,state,name) values('LINE','APPROVED','TEST OUTSOURCE') returning id into o;
+ insert into public.impjo_principals(kind,state,name) values('LINE','APPROVED','TEST MESS') returning id into m;
+ insert into public.impjo_principals(kind,state,name) values('LINE','APPROVED','TEST OTHER') returning id into x;
+ insert into public.impjo_principals(kind,name) values('LINE','TEST PENDING') returning id into p;
+ insert into public.impjo_roles values(a,'ADMIN'),(o,'OUTSOURCE'),(m,'MESS'),(x,'MESS');
+ result:=public.impjo_api(a,'create','{"contact":"TEST","phone":"000","purpose":"AUTH TEST","bls":[{"number":"TEST-BL","hbl":"","consignee":"TEST","destination":"TEST"}]}'); j:=(result->>'id')::uuid;
+ select id into b from public.impjo_bls where job_id=j;
+ assert (public.impjo_api(x,'list')->>'total')::int=0,'Unassigned user leaked jobs';
+ denied:=false;begin perform public.impjo_api(p,'list'); exception when insufficient_privilege then denied:=true;end;assert denied,'Pending user read jobs';
+ denied:=false;begin perform public.impjo_api(o,'people');exception when insufficient_privilege then denied:=true;end;assert denied,'Outsource read people';
+ denied:=false;begin perform public.impjo_api(x,'assign',jsonb_build_object('bl_id',b,'role','MESS','principal_id',x));exception when insufficient_privilege then denied:=true;end;assert denied,'Nonadmin assigned work';
+ perform public.impjo_api(a,'assign',jsonb_build_object('bl_id',b,'role','OUTSOURCE','principal_id',o));
+ perform public.impjo_api(a,'assign',jsonb_build_object('bl_id',b,'role','MESS','principal_id',m));
+ assert (public.impjo_api(o,'list')->>'total')::int=1,'Assigned Outsource cannot see work';
+ denied:=false;begin perform public.impjo_api(m,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));exception when insufficient_privilege then denied:=true;end;assert denied,'MESS started work';
+ perform public.impjo_api(o,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));
+ denied:=false;begin perform public.impjo_api(o,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));exception when insufficient_privilege then denied:=true;end;assert denied,'OUTSOURCE completed work';
+ denied:=false;begin perform public.impjo_api(x,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));exception when no_data_found then denied:=true;end;assert denied,'Other MESS changed work';
+ denied:=false;begin perform public.impjo_api(m,'status',jsonb_build_object('bl_id',b,'status','ISSUE_REPORTED','detail',' '));exception when invalid_parameter_value then denied:=true;end;assert denied,'Empty issue accepted';
+ perform public.impjo_api(m,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));
+ assert exists(select 1 from public.impjo_events where actor_id=m and target_id=b and after_status='COMPLETED'),'Actor audit missing';
+ perform public.impjo_api(a,'assign',jsonb_build_object('bl_id',b,'role','MESS','principal_id',null));
+ assert (public.impjo_api(m,'list')->>'total')::int=0,'Revocation did not remove work';
+ denied:=false;begin perform public.impjo_api(a,'approve',jsonb_build_object('id',o,'role','ADMIN','state','APPROVED'));exception when invalid_parameter_value then denied:=true;end;assert denied,'LINE assigned staff ADMIN';
+ assert not has_table_privilege('anon','public.impjo_jobs','SELECT'),'anon can read jobs';
+ assert not has_table_privilege('authenticated','public.impjo_jobs','SELECT'),'authenticated bypassed Backend';
+ assert not has_function_privilege('anon','public.impjo_api(uuid,text,jsonb)','EXECUTE'),'anon can call privileged RPC';
+ assert not has_function_privilege('authenticated','public.impjo_api(uuid,text,jsonb)','EXECUTE'),'authenticated can impersonate actor';
+end $$;
+rollback;
+select 'PASS: assignment isolation, role transitions, issue requirement, audit actor, revocation, no anon/direct RPC access. All test records rolled back.' as result;
