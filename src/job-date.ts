@@ -1,0 +1,2 @@
+export function bangkokDate(now=new Date()){const p=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(now);const get=(type:string)=>p.find(v=>v.type===type)!.value;return `${get('year')}-${get('month')}-${get('day')}`}
+export function jobDateLabel(value:string|null){return value?new Date(value+'T12:00:00Z').toLocaleDateString('th-TH',{timeZone:'Asia/Bangkok'}):'ยังไม่กำหนดวันที่งาน'}
