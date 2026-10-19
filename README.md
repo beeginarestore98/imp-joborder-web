@@ -60,3 +60,9 @@ Permissions-Policy allows same-origin camera only; microphone and geolocation re
 ## OPERATOR entry from Rich Menu
 
 Owner chose to keep staff creation in a web form inside LINE and declined identity-linking tables. OPERATOR Rich Menu is now a direct URI to /operator. Approved ADMIN/OPERATOR staff see Create immediately; guests see email login and return to /operator after login. An existing LINE session shows an explicit Switch to staff account button, then the same login/form flow. No automatic role elevation or LINE/staff mapping is created. Backend create permissions are unchanged. Bot OPERATOR text also links to /operator. Production form route and active menu URI verified.
+
+## Explicit Job Date
+
+Applied database/job-date.sql. job_date is a separate DATE business field, required for new jobs. created_at remains the immutable recording timestamp. The owner chose to assign all existing dates manually: legacy job_date stays NULL, with no inferred backfill. ADMIN/OPERATOR may set dates on Job Detail; changes are audited. Form, list, detail and print use Job Date, and detail separately labels recorded time.
+
+MESS current list is filtered in SQL: all assigned jobs dated today in Asia/Bangkok, plus unfinished assigned B/L dated before today. Future jobs, undated legacy jobs and completed older B/L are excluded. Current filtering is forced for MESS list requests, regardless of client-supplied filters. Chat buttons recheck the date window. Run tests/job-date.sql and tests/authorization.sql under service_role; fixtures roll back. Build and 22 Node tests pass.
