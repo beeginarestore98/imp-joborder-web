@@ -50,3 +50,9 @@ OPERATOR remains a protected web form with staff email login, as the owner reque
 Tests: node --test tests/backend.test.mjs tests/mess-chat.test.mjs (19 pass). Covers unapproved/group access, issue detail requirement, proposal vs actual write, expiry, replay, revoked assignment and empty PostgREST write responses. Isolated SYSTEM TEST job IMP-2026-0000005 was prepared in IN_PROGRESS with explicit TEST_FIXTURE_PREPARED audit events for real chat verification; it is not a real freight handover.
 
 When a MESS user selects Report Issue, CHAT_EXPECT_ISSUE records the selected B/L for up to 10 minutes. The next plain text message (e.g. นัดวันใหม่) is treated as issue details and produces a confirmation proposal. MESS, another B/L selection or CANCEL/ยกเลิก closes that input context. Approval, role and assignment checks still apply to every request. Confirmation is mandatory before a status write. No new schema was introduced.
+
+## QR scanning
+
+Rich Menu now has MESS, OPERATOR and SCAN QR. SCAN QR opens https://imp-joborder-web.pages.dev/scan. Approved users may explicitly start the camera or select a QR image. jsqr 1.4.0 decodes images locally; no camera/photo is uploaded. Only canonical HTTPS production /jobs/<UUID> links are accepted; arbitrary origins, credentials and non-job routes are rejected. Existing job detail backend checks remain authoritative, so scanning never grants an assignment. My Jobs opens /jobs with server-filtered access. LINE login has an allowlisted /scan return cookie; arbitrary redirect destinations are rejected.
+
+Permissions-Policy allows same-origin camera only; microphone and geolocation remain disabled. CSP permits local blob images/media needed for decoding. No camera prompt occurs until the user presses Start Camera. Image decoding on the live site verified opening test job IMP-2026-0000006. Production build and 21 tests passed. Physical mobile camera/LINE permission flow still needs owner device verification.
