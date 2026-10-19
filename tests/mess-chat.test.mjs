@@ -5,7 +5,7 @@ const env={SUPABASE_URL:'https://test.supabase.co',SUPABASE_SERVICE_ROLE_KEY:'TE
 const actor='aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa',bl='bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb';
 const event=(extra={})=>({type:'message',source:{type:'user',userId:'U'+'1'.repeat(32)},message:{type:'text',text:'MESS'},...extra});
 const me={kind:'LINE',state:'APPROVED',roles:['MESS']};
-const detail=(status='IN_PROGRESS')=>({jobs:[{id:'cccccccc-cccc-4ccc-cccc-cccccccccccc',number:'TEST-JOB',bls:[{id:bl,number:'TEST-BL',status}]}]});
+const detail=(status='IN_PROGRESS')=>({jobs:[{id:'cccccccc-cccc-4ccc-cccc-cccccccccccc',number:'TEST-JOB',job_date:new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),bls:[{id:bl,number:'TEST-BL',status}]}]});
 async function scenario(responses,run){const original=globalThis.fetch,calls=[];globalThis.fetch=async(url,options={})=>{calls.push({url:String(url),body:options.body?JSON.parse(options.body):null});const item=responses.shift();assert.notEqual(item,undefined,'Unexpected backend request');return item instanceof Response?item:new Response(JSON.stringify(item),{headers:{'content-type':'application/json'}})};try{return await run(calls)}finally{globalThis.fetch=original;assert.equal(responses.length,0,'Backend requests missing')}}
 test('group chat cannot fetch any job data',()=>scenario([],async()=>{const r=await messChat(env,event({source:{type:'group',userId:'U'+'1'.repeat(32)}}));assert.match(r.text,/แชตส่วนตัว/)}));
 test('typing MESS never grants an unapproved user access',()=>scenario([actor,{...me,state:'PENDING'}],async calls=>{assert.match((await messChat(env,event())).text,/ยังไม่มีสิทธิ์/);assert.equal(calls.length,2)}));
