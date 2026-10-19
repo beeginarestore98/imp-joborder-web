@@ -7,3 +7,4 @@ test('anonymous me is rejected',async()=>{const res=await onRequest({request:new
 test('missing environment fails closed',async()=>{const res=await onRequest({request:new Request('https://imp-joborder-web.pages.dev/api/me'),env:{},params:{}});assert.equal(res.status,503)});
 test('unverified LINE webhook rejected before storage',async()=>{const res=await onRequest({request:new Request('https://imp-joborder-web.pages.dev/api/line/webhook',{method:'POST',body:'{"events":[]}'}),env:{...env,LINE_MESSAGING_CHANNEL_SECRET:'TEST',LINE_MESSAGING_CHANNEL_ACCESS_TOKEN:'TEST'},params:{}});assert.equal(res.status,401)});
 
+test('forged OAuth callback without browser state is rejected',async()=>{const res=await onRequest({request:new Request('https://imp-joborder-web.pages.dev/api/line/callback?state=forged&code=forged'),env,params:{}});assert.equal(res.status,401)});
