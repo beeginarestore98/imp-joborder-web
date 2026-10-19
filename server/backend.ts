@@ -72,12 +72,19 @@ export async function messChat(env:Env,event:ChatEvent){
  const selection=postback.match(/^mess-select:([0-9a-f-]{36})$/);
  if(selection){
   const {job,bl}=await assignedBL(selection[1]);
+  await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_INPUT_CLOSED',target_id:bl.id});
   return chatText(`${job.number}\nB/L ${bl.number}\nสถานะ: ${chatStatus[bl.status]}${bl.status==='IN_PROGRESS'?'\nเลือกรายงานผลด้านล่าง':'\nอัปเดตได้เฉพาะงานที่กำลังดำเนินการ'}`,bl.status==='IN_PROGRESS'?[chatButton('เสร็จสมบูรณ์','mess-propose:COMPLETED:'+bl.id),chatButton('แจ้งปัญหา','mess-issue:'+bl.id)]:[]);
  }
  const issuePrompt=postback.match(/^mess-issue:([0-9a-f-]{36})$/);
- if(issuePrompt){const {bl}=await assignedBL(issuePrompt[1]);return chatText(`พิมพ์ข้อความตามรูปแบบนี้ พร้อมรายละเอียดปัญหา (ไม่เกิน 2,000 ตัวอักษร):\nปัญหา ${bl.id} รายละเอียดปัญหา\nระบบจะให้ยืนยันก่อนบันทึก ไม่ต้องแนบรูป`)}
+ if(issuePrompt){const {bl}=await assignedBL(issuePrompt[1]);if(bl.status!=='IN_PROGRESS')return chatText('รายการนี้ไม่ได้อยู่ระหว่างดำเนินการแล้ว กรุณาพิมพ์ MESS เพื่อดูงานล่าสุด');await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_EXPECT_ISSUE',target_id:bl.id});return chatText(`B/L ${bl.number}\nพิมพ์รายละเอียดปัญหาได้เลย เช่น นัดวันใหม่ (ไม่เกิน 2,000 ตัวอักษร)\nระบบจะให้ยืนยันก่อนบันทึก ไม่ต้องแนบรูป\nขั้นตอนนี้หมดอายุใน 10 นาที พิมพ์ ยกเลิก เพื่อออก`)}
  const complete=postback.match(/^mess-propose:COMPLETED:([0-9a-f-]{36})$/)||text.match(/^(?:เสร็จ|COMPLETED)\s+([0-9a-f-]{36})$/i);
- const issue=text.match(/^(?:ปัญหา|ISSUE)\s+([0-9a-f-]{36})(?:\s+([\s\S]*))?$/i);
+ let issue=text.match(/^(?:ปัญหา|ISSUE)\s+([0-9a-f-]{36})(?:\s+([\s\S]*))?$/i);
+ if(!postback&&!complete&&!issue&&!/^(?:MESS|งาน)(?:\s|$)/i.test(text)){
+  if(/^(?:ยกเลิก|CANCEL)$/i.test(text)){await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_INPUT_CLOSED'});return chatText('ยกเลิกการกรอกรายละเอียดแล้ว พิมพ์ MESS เพื่อดูงาน');}
+  const pending=await sb(env,`/rest/v1/impjo_events?actor_id=eq.${actorId}&action=in.(CHAT_EXPECT_ISSUE,CHAT_INPUT_CLOSED,CHAT_PROPOSE_COMPLETED,CHAT_PROPOSE_ISSUE_REPORTED)&order=id.desc&limit=1&select=action,target_id,created_at`) as unknown as {action:string;target_id:string;created_at:string}[];
+  if(pending[0]?.action==='CHAT_EXPECT_ISSUE'&&Date.now()-Date.parse(pending[0].created_at)<=600000&&text)issue=['',pending[0].target_id,text] as unknown as RegExpMatchArray;
+  else return botReply(text,env.LIFF_ID);
+ }
  if(complete||issue){
   const id=(complete||issue)![1],detail=issue?(issue[2]||'').trim():'',status=issue?'ISSUE_REPORTED':'COMPLETED';
   if(issue&&!detail)return chatText('กรุณาระบุรายละเอียดปัญหาหลังรหัส B/L');
@@ -90,6 +97,7 @@ export async function messChat(env:Env,event:ChatEvent){
   return chatText(`ยืนยันรายงานผล?\n${job.number}\nB/L ${bl.number}\nสถานะใหม่: ${chatStatus[status]}${detail?'\nรายละเอียด: '+detail:''}\nยังไม่บันทึกจนกด “ยืนยันบันทึก” ภายใน 10 นาที`,[chatButton('ยืนยันบันทึก','mess-confirm:'+drafts[0].id),{type:'message',label:'กลับดูงาน',text:'MESS'}]);
  }
  if(postback.startsWith('mess-'))return chatText('คำสั่งไม่ถูกต้อง กรุณาพิมพ์ MESS เพื่อเริ่มใหม่');
+ await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_INPUT_CLOSED'});
  const pageMatch=text.match(/^MESS\s+(\d+)$/i),search=text.replace(/^(?:MESS|งาน)\s*/i,'');
  const page=pageMatch?Math.max(1,Math.min(Number(pageMatch[1]),100000)):1;
  const result=await call('list',{page,size:5,status:'IN_PROGRESS',search:pageMatch?'':search}) as unknown as {jobs:ChatJob[];total:number};
@@ -114,7 +122,7 @@ async function webhook(request:Request,env:Env){
    // Commands choose a workflow only; neither a typed role nor a display name grants access.
    if(event.source?.type&&event.source.type!=='user')continue;
    let message:unknown=botReply(event.message?.text||'',env.LIFF_ID);
-   if(event.postback?.data?.startsWith('mess-')||/^(?:MESS|งาน|เสร็จ|COMPLETED|ปัญหา|ISSUE)(?:\s|$)/i.test((event.message?.text||'').trim())){
+   if(event.postback?.data?.startsWith('mess-')||(event.type==='message'&&event.message?.type==='text'&&!/^OPERATOR$/i.test((event.message.text||'').trim()))){
     try{message=await messChat(env,event)}catch(error){if(!(error instanceof ApiError))throw error;message=chatText(['ACCESS_DENIED','APPROVAL_REQUIRED','NOT_FOUND'].includes(error.message)?'ไม่มีสิทธิ์เข้าถึง B/L นี้ หรือถูกถอนการมอบหมาย กรุณาติดต่อ ADMIN':error.message==='INVALID_STATUS_TRANSITION'?'สถานะงานหรือสิทธิ์เปลี่ยนไปแล้ว กรุณาพิมพ์ MESS เพื่อดูข้อมูลล่าสุด':'ทำรายการไม่สำเร็จ กรุณาพิมพ์ MESS แล้วลองใหม่')}
    }
    const reply=await fetch('https://api.line.me/v2/bot/message/reply',{method:'POST',headers:{Authorization:`Bearer ${env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN}`,'Content-Type':'application/json'},body:JSON.stringify({replyToken:event.replyToken,messages:[message]}),signal:AbortSignal.timeout(10000)});
