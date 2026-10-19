@@ -24,6 +24,8 @@ Build checks frontend, gateway and backend TypeScript. Cloudflare builds main wi
 
 database/setup.sql is a one-time setup record, not an idempotent rerun. The bootstrap email is a placeholder in source: substitute only the owner-approved ADMIN email before first setup. This setup has already been applied to the approved project. Do not rerun it or silently overwrite existing tables.
 
+Apply order for a fresh approved installation: setup.sql, staff-session.sql, then auth-bridge.sql. These migrations are already applied in production. The non-exposed impjo_private schema contains narrowly scoped SECURITY DEFINER helpers for verified staff identity and active Auth sessions. Only service_role may execute them; the backend has no broad read grant on auth.users or auth.sessions.
+
 All impjo_* tables have RLS and no anon/authenticated grants. SECURITY INVOKER RPCs are service_role-only. Backend validates a staff token with Supabase Auth or resolves a hashed opaque LINE session, then SQL rechecks current approval, role and assignment on every operation. Audit and business writes share transactions.
 
 Operator/Admin use staff email/password. Staff registration requires email confirmation; confirm the project email-verification setting before onboarding. LINE identities are separate internal principals and never receive fake email or OPERATOR accounts. ADMIN must compare a user's UUID with the person directly before approving; display name alone is insufficient.
