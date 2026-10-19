@@ -1,4 +1,5 @@
 begin;
+set local role service_role;
 do $$
 declare a uuid; o uuid; m uuid; x uuid; p uuid; j uuid; b uuid; result jsonb; denied boolean;
 begin
