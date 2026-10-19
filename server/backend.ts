@@ -139,7 +139,7 @@ export async function onRequest({request,env}:Ctx){try{
   if(!env.LINE_LOGIN_CHANNEL_ID||!env.LINE_LOGIN_CHANNEL_SECRET)throw new ApiError('LINE_NOT_CONFIGURED',503);
   const state=random(),nonce=random(),verifier=random();const bytes=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier)));const challenge=btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
   const auth=new URL('https://access.line.me/oauth2/v2.1/authorize');auth.search=new URLSearchParams({response_type:'code',client_id:env.LINE_LOGIN_CHANNEL_ID,redirect_uri:ORIGIN+'/api/line/callback',state,scope:'openid',nonce,code_challenge:challenge,code_challenge_method:'S256',bot_prompt:'normal'}).toString();
-  const headers=new Headers({Location:auth.toString(),'Cache-Control':'no-store'});for(const [k,v] of [['state',state],['nonce',nonce],['verifier',verifier]])headers.append('Set-Cookie',cookie(k,v,600));return new Response(null,{status:302,headers});
+  const headers=new Headers({Location:auth.toString(),'Cache-Control':'no-store'});for(const [k,v] of [['state',state],['nonce',nonce],['verifier',verifier],['next',url.searchParams.get('next')==='/scan'?'/scan':'/portal']])headers.append('Set-Cookie',cookie(k,v,600));return new Response(null,{status:302,headers});
  }
  if(path==='line/callback'&&request.method==='GET'){
   const state=getCookie(request,'state'),nonce=getCookie(request,'nonce'),verifier=getCookie(request,'verifier');
@@ -149,8 +149,8 @@ export async function onRequest({request,env}:Ctx){try{
   const checked=await fetch('https://api.line.me/oauth2/v2.1/verify',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({id_token:tokens.id_token,client_id:env.LINE_LOGIN_CHANNEL_ID,nonce}),signal:AbortSignal.timeout(10000)});
   const identity=await checked.json() as {iss?:string;aud?:string;exp?:number;sub?:string;nonce?:string};
   if(!checked.ok||identity.iss!=='https://access.line.me'||identity.aud!==env.LINE_LOGIN_CHANNEL_ID||identity.nonce!==nonce||!identity.exp||identity.exp<=Date.now()/1000||!/^U[0-9a-f]{32}$/.test(identity.sub||''))throw new ApiError('INVALID_LINE_TOKEN',401);
-  const s=await lineSession(env,identity.sub!);const headers=new Headers({Location:ORIGIN+'/portal','Cache-Control':'no-store'});
-  for(const c of [cookie('line',s.session,28800),cookie('staff','',0),cookie('state','',0),cookie('nonce','',0),cookie('verifier','',0)])headers.append('Set-Cookie',c);
+  const s=await lineSession(env,identity.sub!);const headers=new Headers({Location:ORIGIN+(getCookie(request,'next')==='/scan'?'/scan':'/portal'),'Cache-Control':'no-store'});
+  for(const c of [cookie('line',s.session,28800),cookie('staff','',0),cookie('state','',0),cookie('nonce','',0),cookie('verifier','',0),cookie('next','',0)])headers.append('Set-Cookie',c);
   return new Response(null,{status:302,headers});
  }
  if(path==='config'&&request.method==='GET')return json({liffId:env.LIFF_ID||null,oa:'@110deiyl',lineChannel:env.LINE_LOGIN_CHANNEL_ID||null});
