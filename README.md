@@ -32,4 +32,5 @@ Database authorization tests in tests/authorization.sql run in a transaction and
 
 No real business data can be publicly read. If a secret or backend is unavailable, the API fails closed. Staff sessions expire after at most one hour and require login again; LINE sessions expire after eight hours or immediately when revoked. Approving/changing a user's role revokes their old LINE sessions and assignments, so they must sign in again and be reassigned.
 
-Current initial limits: 50 B/L per job, 10 jobs per list page, 50 users/events per page. Assignment picker currently shows the most recent 50 users. QR generation, document print templates, general job editing, exports and Messaging API automation are not yet enabled. Never claim these features work until implemented and verified.
+Current initial limits: 50 B/L per job, 10 jobs per list page, 50 users/events per page. Assignment picker currently shows the most recent 50 users. QR codes and browser printing are implemented for authorized Job Detail pages. QR links require login and object authorization; they are not public access tokens. General job editing, exports and Messaging API automation are not yet enabled. Never claim these features work until implemented and verified.
+
