@@ -8,7 +8,7 @@ No mock records or mock login. All job/search/dashboard/assignment/status/audit 
 
 Cloudflare Production Secret: IMPJO_GATEWAY_SECRET. The same secret must be stored in Supabase Edge Secrets. Do not commit credentials or .dev.vars. Supabase backend automatically receives its own SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and SUPABASE_ANON_KEY; no privileged database key is placed in Cloudflare or the browser.
 
-Supabase Edge Secrets: IMPJO_GATEWAY_SECRET, LINE_LOGIN_CHANNEL_SECRET. Optional Messaging API secrets: LINE_MESSAGING_CHANNEL_SECRET and LINE_MESSAGING_CHANNEL_ACCESS_TOKEN. Messaging remains disabled until the owner authorizes token creation.
+Supabase Edge Secrets: IMPJO_GATEWAY_SECRET, LINE_LOGIN_CHANNEL_SECRET. Messaging API secrets: LINE_MESSAGING_CHANNEL_SECRET and LINE_MESSAGING_CHANNEL_ACCESS_TOKEN. Owner authorized activation on 2026-10-20; both are stored only in Supabase Edge Secrets.
 
 LINE Login Channel 2012071986; Provider 2005629037; linked OA @110deiyl. Callback https://imp-joborder-web.pages.dev/api/line/callback. LIFF 2012071986-ymuhMXOT points to /portal. LINE Login uses authorization code + PKCE + state + nonce on server. LINE and staff credentials are kept in Secure HttpOnly cookies, never app localStorage. Login sessions require the user's verified identity; pending users cannot see jobs.
 
@@ -34,5 +34,11 @@ Database authorization tests in tests/authorization.sql run in a transaction and
 
 No real business data can be publicly read. If a secret or backend is unavailable, the API fails closed. Staff sessions expire after at most one hour and require login again; LINE sessions expire after eight hours or immediately when revoked. Approving/changing a user's role revokes their old LINE sessions and assignments, so they must sign in again and be reassigned.
 
-Current initial limits: 50 B/L per job, 10 jobs per list page, 50 users/events per page. Assignment picker currently shows the most recent 50 users. QR codes and browser printing are implemented for authorized Job Detail pages. QR links require login and object authorization; they are not public access tokens. General job editing, exports and Messaging API automation are not yet enabled. Never claim these features work until implemented and verified.
+Current initial limits: 50 B/L per job, 10 jobs per list page, 50 users/events per page. Assignment picker currently shows the most recent 50 users. QR codes and browser printing are implemented for authorized Job Detail pages. QR links require login and object authorization; they are not public access tokens. General job editing and exports are not yet enabled. Never claim these features work until implemented and verified.
 
+
+## LINE OA bot entry
+
+Webhook: https://imp-joborder-web.pages.dev/api/line/webhook (LINE Console Verify succeeded). HMAC signature required; private one-to-one messages only. Default Rich Menu IMP MESS OPERATOR (OA Manager ID 20441967), two Text actions MESS and OPERATOR, displayed 2026-10-20 through 2027-10-20. Menu image is maintained in the delivery outputs.
+
+MESS opens LIFF/Portal for assigned B/L completion or issue details. OPERATOR opens /jobs/new and requires an approved staff email login. Codes select a workflow; they never assign a role, grant access or create accounts. Unknown text/follow replies with code choices. Actual job creation and status changes occur in the protected web forms, not as unauthenticated chat writes. No push/broadcast is sent by this bot. Auto-response messages disabled (manual chat retained, response-hours scheduling off) to prevent duplicate replies. Test both commands from a real friend account before calling chat delivery end-to-end verified.
