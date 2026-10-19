@@ -22,11 +22,22 @@ async function lineSession(env:Env,subject:string){const session=random();const 
 async function actor(request:Request,env:Env){const token=getCookie(request,'staff');if(token){const user=await sb(env,'/auth/v1/user',undefined,token);if(!user.id)throw new ApiError('AUTH_REQUIRED',401);return await rpc(env,'impjo_staff_session_actor',{p_uid:user.id,p_session:sessionId(token)}) as unknown as string}const line=getCookie(request,'line');if(line){const id=await rpc(env,'impjo_session_actor',{p_hash:await digest(line)});if(id)return id as unknown as string}throw new ApiError('AUTH_REQUIRED',401)}
 async function readBody(request:Request){if(!request.headers.get('content-type')?.startsWith('application/json'))throw new ApiError('JSON_REQUIRED',415);const text=await request.text();if(text.length>65536)throw new ApiError('REQUEST_TOO_LARGE',413);try{return JSON.parse(text) as Record<string,unknown>}catch{throw new ApiError('INVALID_JSON')}}
 export async function verifyWebhook(raw:string,signature:string,secret:string){try{const bytes=Uint8Array.from(atob(signature),c=>c.charCodeAt(0));if(bytes.length!==32)return false;const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['verify']);return await crypto.subtle.verify('HMAC',key,bytes,new TextEncoder().encode(raw))}catch{return false}}
+export function botReply(text:string,liffId:string){
+ const command=text.trim().toUpperCase();
+ const portal=liffId?`https://liff.line.me/${liffId}`:`${ORIGIN}/portal`;
+ const quickReply={items:[{type:'action',action:{type:'message',label:'MESS · อัปเดตงาน',text:'MESS'}},{type:'action',action:{type:'message',label:'OPERATOR · สร้างงาน',text:'OPERATOR'}}]};
+ const messages=command==='MESS'
+  ?`MESS — อัปเดตสถานะงาน\nเปิดงานที่ได้รับมอบหมาย เลือก B/L แล้วกดรายงานเสร็จสมบูรณ์ หรือรายงานปัญหาพร้อมรายละเอียด\n${portal}\nต้องเข้าสู่ LINE และได้รับอนุมัติ MESS จาก ADMIN ก่อน`
+  :command==='OPERATOR'
+  ?`OPERATOR — สร้าง Job Order\nเข้าสู่ระบบด้วยอีเมลบัญชีทีมงาน แล้วเปิดฟอร์มสร้างงาน\n${ORIGIN}/jobs/new\nรองรับหลาย B/L และฐานข้อมูลสร้างเลข Job อัตโนมัติ\nหากกำลังใช้บัญชี LINE ให้ออกจากระบบก่อนเข้าสู่บัญชีทีมงาน`
+  :`IMP Job Order\nพิมพ์รหัสเริ่มใช้งาน หรือเลือกปุ่มด้านล่าง:\nMESS — ดูงานและอัปเดตสถานะ\nOPERATOR — สร้าง Job Order\nรหัสเป็นการเลือกเมนู สิทธิ์จริงตรวจจากบัญชีและงานที่ได้รับมอบหมาย`;
+ return {type:'text',text:messages,quickReply};
+}
 async function webhook(request:Request,env:Env){
  if(!env.LINE_MESSAGING_CHANNEL_SECRET||!env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN)return json({error:'WEBHOOK_NOT_CONFIGURED'},503);
  const raw=await request.text();if(raw.length>262144)return json({error:'REQUEST_TOO_LARGE'},413);
  if(!await verifyWebhook(raw,request.headers.get('x-line-signature')||'',env.LINE_MESSAGING_CHANNEL_SECRET))return json({error:'INVALID_SIGNATURE'},401);
- const payload=JSON.parse(raw) as {events?:Array<{webhookEventId?:string;type:string;replyToken?:string;source?:{userId?:string};message?:{type:string;text?:string}}>};
+ const payload=JSON.parse(raw) as {events?:Array<{webhookEventId?:string;type:string;replyToken?:string;source?:{type?:string;userId?:string};message?:{type:string;text?:string}}>};
  if(!Array.isArray(payload.events)||payload.events.length>100)return json({error:'INVALID_WEBHOOK'},400);
  for(const event of payload.events){
   if(!event.webhookEventId)continue;
@@ -34,9 +45,9 @@ async function webhook(request:Request,env:Env){
   if(existing.some(v=>v.state==='DONE'))continue;
   if(!existing.length)await sb(env,'/rest/v1/impjo_webhook_events',{event_id:event.webhookEventId});
   if(event.replyToken&&(event.type==='follow'||(event.type==='message'&&event.message?.type==='text'))){
-   const url=env.LIFF_ID?`https://liff.line.me/${env.LIFF_ID}`:`${ORIGIN}/portal`;
-   // No work data or role is disclosed through unauthenticated chat commands.
-   const reply=await fetch('https://api.line.me/v2/bot/message/reply',{method:'POST',headers:{Authorization:`Bearer ${env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN}`,'Content-Type':'application/json'},body:JSON.stringify({replyToken:event.replyToken,messages:[{type:'text',text:`IMP Job Order\nเปิดระบบเพื่อดูงานที่ได้รับมอบหมายและรายงานผล:\n${url}\nผู้ใช้ใหม่ต้องได้รับอนุมัติจาก ADMIN ก่อนใช้งาน`}]}),signal:AbortSignal.timeout(10000)});
+   // Commands choose a workflow only; neither a typed role nor a display name grants access.
+   if(event.source?.type&&event.source.type!=='user')continue;
+   const reply=await fetch('https://api.line.me/v2/bot/message/reply',{method:'POST',headers:{Authorization:`Bearer ${env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN}`,'Content-Type':'application/json'},body:JSON.stringify({replyToken:event.replyToken,messages:[botReply(event.message?.text||'',env.LIFF_ID)]}),signal:AbortSignal.timeout(10000)});
    if(!reply.ok&&reply.status!==400)throw new ApiError('LINE_REPLY_FAILED',503);
   }
   await sb(env,`/rest/v1/impjo_webhook_events?event_id=eq.${id}`,{state:'DONE',completed_at:new Date().toISOString()},undefined,'PATCH');
@@ -94,4 +105,3 @@ export async function onRequest({request,env}:Ctx){try{
  if(path==='me'&&request.method==='GET')return json(await rpc(env,'impjo_api',{p_actor:await actor(request,env),p_action:'me',p_data:{}}));
  return json({error:'NOT_FOUND'},404);
 }catch(error){if(error instanceof ApiError)return json({error:error.message},error.status);return json({error:'SERVICE_UNAVAILABLE'},503)}}
-
