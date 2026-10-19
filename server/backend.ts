@@ -12,7 +12,7 @@ async function sb(env:Env,path:string,body?:unknown,auth?:string,method?:string)
  else if(key?.startsWith('eyJ'))headers.Authorization=`Bearer ${key}`;
  const response=await fetch(`${env.SUPABASE_URL}${path}`,{method:method||(body===undefined?'GET':'POST'),headers,body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
  const data=await response.json() as Record<string,unknown>;
- if(!response.ok){const code=String(data.code||'');const known=['AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')?401:code==='42501'?403:code==='P0002'?404:400)}
+ if(!response.ok){const code=String(data.code||'');const known=['AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')||code==='28000'?401:code==='42501'?403:code==='P0002'?404:400)}
  return data;
 }
 const rpc=(env:Env,name:string,data:unknown)=>sb(env,`/rest/v1/rpc/${name}`,data);
@@ -81,16 +81,6 @@ export async function onRequest({request,env}:Ctx){try{
    await sb(env,`/auth/v1/signup?redirect_to=${encodeURIComponent(ORIGIN+'/login')}`,{email,password},env.SUPABASE_PUBLISHABLE_KEY);
    return json({message:'ตรวจสอบอีเมลเพื่อยืนยันบัญชี แล้วกลับมาเข้าสู่ระบบ ผู้ใช้ใหม่ต้องรอ ADMIN อนุมัติ'});
   }
-  if(path==='auth/line'){
-   if(!env.LINE_LOGIN_CHANNEL_ID||!env.LIFF_ID)throw new ApiError('LINE_NOT_CONFIGURED',503);
-   const token=String(data.idToken||'');if(!token||token.length>10000)throw new ApiError('INVALID_LINE_TOKEN',401);
-   const verify=await fetch('https://api.line.me/oauth2/v2.1/verify',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({id_token:token,client_id:env.LINE_LOGIN_CHANNEL_ID}),signal:AbortSignal.timeout(10000)});
-   const verified=await verify.json() as {iss?:string;aud?:string;exp?:number;sub?:string};
-   if(!verify.ok||verified.iss!=='https://access.line.me'||verified.aud!==env.LINE_LOGIN_CHANNEL_ID||!verified.exp||verified.exp<=Date.now()/1000||!/^U[0-9a-f]{32}$/.test(verified.sub||''))throw new ApiError('INVALID_LINE_TOKEN',401);
-   const session=Array.from(crypto.getRandomValues(new Uint8Array(32))).map(v=>v.toString(16).padStart(2,'0')).join('');
-   const id=await rpc(env,'impjo_line_session',{p_subject:verified.sub,p_hash:await digest(session)});const me=await rpc(env,'impjo_api',{p_actor:id,p_action:'me',p_data:{}});
-   return json({me},200,[cookie('line',session,28800),cookie('staff','',0)]);
-  }
   if(path==='auth/logout'){
    const line=getCookie(request,'line');if(line)await sb(env,`/rest/v1/impjo_sessions?token_hash=eq.${await digest(line)}`,{revoked_at:new Date().toISOString()},undefined,'PATCH');
    const token=getCookie(request,'staff');if(token)try{await sb(env,'/auth/v1/logout',{},token)}catch{/* Local cookie is still cleared. */}
@@ -104,3 +94,4 @@ export async function onRequest({request,env}:Ctx){try{
  if(path==='me'&&request.method==='GET')return json(await rpc(env,'impjo_api',{p_actor:await actor(request,env),p_action:'me',p_data:{}}));
  return json({error:'NOT_FOUND'},404);
 }catch(error){if(error instanceof ApiError)return json({error:error.message},error.status);return json({error:'SERVICE_UNAVAILABLE'},503)}}
+
