@@ -1,0 +1,2 @@
+import{test}from'node:test';import assert from'node:assert/strict';import{bangkokDate,jobDateLabel}from'../src/job-date.ts';
+test('job day follows Thai midnight independently of UTC recording day',()=>{assert.equal(bangkokDate(new Date('2026-10-19T16:59:59Z')),'2026-10-19');assert.equal(bangkokDate(new Date('2026-10-19T17:00:00Z')),'2026-10-20');assert.equal(jobDateLabel(null),'ยังไม่กำหนดวันที่งาน');assert.match(jobDateLabel('2026-10-21'),/21/)});
