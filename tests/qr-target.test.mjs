@@ -1,0 +1,3 @@
+import{test}from'node:test';import assert from'node:assert/strict';import{qrJobPath}from'../src/qr-target.ts';
+const id='0f97b4d0-59f0-4b1b-b6fd-5d5aa7d4bb24';
+test('QR accepts only canonical IMP job links and strips query data',()=>{assert.equal(qrJobPath('https://imp-joborder-web.pages.dev/jobs/'+id+'?x=1'),'/jobs/'+id);for(const url of ['https://evil.example/jobs/'+id,'javascript:alert(1)','https://imp-joborder-web.pages.dev.evil.test/jobs/'+id,'https://imp-joborder-web.pages.dev/people','http://imp-joborder-web.pages.dev/jobs/'+id,'https://user:pass@imp-joborder-web.pages.dev/jobs/'+id])assert.equal(qrJobPath(url),null)});
