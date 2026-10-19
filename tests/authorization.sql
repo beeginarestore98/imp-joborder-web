@@ -1,5 +1,4 @@
 begin;
-set local role service_role;
 do $$
 declare a uuid; o uuid; m uuid; x uuid; p uuid; j uuid; b uuid; result jsonb; denied boolean;
 begin
@@ -9,7 +8,7 @@ begin
  insert into public.impjo_principals(kind,state,name) values('LINE','APPROVED','TEST OTHER') returning id into x;
  insert into public.impjo_principals(kind,name) values('LINE','TEST PENDING') returning id into p;
  insert into public.impjo_roles values(a,'ADMIN'),(o,'OUTSOURCE'),(m,'MESS'),(x,'MESS');
- result:=public.impjo_api(a,'create','{"contact":"TEST","phone":"000","purpose":"AUTH TEST","bls":[{"number":"TEST-BL","hbl":"","consignee":"TEST","destination":"TEST"}]}'); j:=(result->>'id')::uuid;
+ result:=public.impjo_api(a,'create',jsonb_build_object('job_date',(now() at time zone 'Asia/Bangkok')::date)||'{"contact":"TEST","phone":"000","purpose":"AUTH TEST","bls":[{"number":"TEST-BL","hbl":"","consignee":"TEST","destination":"TEST"}]}'); j:=(result->>'id')::uuid;
  select id into b from public.impjo_bls where job_id=j;
  assert (public.impjo_api(x,'list')->>'total')::int=0,'Unassigned user leaked jobs';
  denied:=false;begin perform public.impjo_api(p,'list'); exception when insufficient_privilege then denied:=true;end;assert denied,'Pending user read jobs';
