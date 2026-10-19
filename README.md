@@ -37,8 +37,14 @@ No real business data can be publicly read. If a secret or backend is unavailabl
 Current initial limits: 50 B/L per job, 10 jobs per list page, 50 users/events per page. Assignment picker currently shows the most recent 50 users. QR codes and browser printing are implemented for authorized Job Detail pages. QR links require login and object authorization; they are not public access tokens. General job editing and exports are not yet enabled. Never claim these features work until implemented and verified.
 
 
-## LINE OA bot entry
+## LINE OA chat
 
-Webhook: https://imp-joborder-web.pages.dev/api/line/webhook (LINE Console Verify succeeded). HMAC signature required; private one-to-one messages only. Default Rich Menu IMP MESS OPERATOR (OA Manager ID 20441967), two Text actions MESS and OPERATOR, displayed 2026-10-20 through 2027-10-20. Menu image is maintained in the delivery outputs.
+Webhook: https://imp-joborder-web.pages.dev/api/line/webhook. Rich Menu sends MESS / OPERATOR. Messaging credentials remain only in Supabase Edge Secrets.
 
-MESS opens LIFF/Portal for assigned B/L completion or issue details. OPERATOR opens /jobs/new and requires an approved staff email login. Codes select a workflow; they never assign a role, grant access or create accounts. Unknown text/follow replies with code choices. Actual job creation and status changes occur in the protected web forms, not as unauthenticated chat writes. No push/broadcast is sent by this bot. Auto-response messages disabled (manual chat retained, response-hours scheduling off) to prevent duplicate replies. Test both commands from a real friend account before calling chat delivery end-to-end verified.
+MESS now lists assigned IN_PROGRESS B/L in private chat. Select a B/L, propose COMPLETED or send ISSUE details, then tap the confirmation within 10 minutes. Only the sender mapped from a valid LINE-signed webhook may act. Every request checks current approved MESS role; detail and status calls recheck current assignment through impjo_api. No role is granted by a code. Group chats cannot read job data. Issue details are required and capped at 2000 characters. Lists use server pagination/search (MESS 2, or MESS followed by a B/L or job number).
+
+Confirmation proposals are recorded as CHAT_PROPOSE_* audit events. They do not change a business status. Confirmation is bound to the audit actor and expires after 10 minutes; status and assignment are read again. Replayed confirmations do not repeat the status write or its audit. Actual writes use the existing atomic impjo_api status transaction. No schema or RLS changes were needed.
+
+OPERATOR remains a protected web form with staff email login, as the owner requested. Creating jobs in chat is not enabled. The website polls visible data every 15 seconds and refreshes on focus; it shares the same Supabase records as the bot. This is polling, not a Realtime subscription.
+
+Tests: node --test tests/backend.test.mjs tests/mess-chat.test.mjs (17 pass). Covers unapproved/group access, issue detail requirement, proposal vs actual write, expiry, replay, revoked assignment and empty PostgREST write responses. Isolated SYSTEM TEST job IMP-2026-0000005 was prepared in IN_PROGRESS with explicit TEST_FIXTURE_PREPARED audit events for real chat verification; it is not a real freight handover.
