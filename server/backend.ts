@@ -12,7 +12,7 @@ async function sb(env:Env,path:string,body?:unknown,auth?:string,method?:string)
  else if(key?.startsWith('eyJ'))headers.Authorization=`Bearer ${key}`;
  const response=await fetch(`${env.SUPABASE_URL}${path}`,{method:method||(body===undefined?'GET':'POST'),headers,body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
  const raw=await response.text();const data=(raw?JSON.parse(raw):{}) as Record<string,unknown>;
- if(!response.ok){const code=String(data.code||'');const known=['AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')||code==='28000'?401:code==='42501'?403:code==='P0002'?404:400)}
+ if(!response.ok){const code=String(data.code||'');const known=['AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG','INVALID_JOB_DATE'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')||code==='28000'?401:code==='42501'?403:code==='P0002'?404:400)}
  return data;
 }
 const rpc=(env:Env,name:string,data:unknown)=>sb(env,`/rest/v1/rpc/${name}`,data);
@@ -35,7 +35,7 @@ export function botReply(text:string,liffId:string){
 }
 type ChatEvent={webhookEventId?:string;type:string;replyToken?:string;source?:{type?:string;userId?:string};message?:{type:string;text?:string};postback?:{data?:string}};
 type ChatBL={id:string;number:string;status:string};
-type ChatJob={id:string;number:string;bls:ChatBL[]};
+type ChatJob={job_date:string|null;id:string;number:string;bls:ChatBL[]};
 const chatText=(text:string,actions:unknown[]=[])=>({type:'text',text,...(actions.length?{quickReply:{items:actions.map(action=>({type:'action',action}))}}:{})});
 const chatButton=(label:string,data:string)=>({type:'postback',label:label.slice(0,20),data});
 const chatStatus:Record<string,string>={PENDING_HANDOVER:'รอส่งมอบ',IN_PROGRESS:'กำลังดำเนินการ',COMPLETED:'เสร็จสมบูรณ์',ISSUE_REPORTED:'พบปัญหา'};
@@ -47,6 +47,7 @@ export async function messChat(env:Env,event:ChatEvent){
  const me=await rpc(env,'impjo_api',{p_actor:actorId,p_action:'me',p_data:{}}) as unknown as {kind:string;state:string;roles:string[]};
  if(me.kind!=='LINE'||me.state!=='APPROVED'||!me.roles.includes('MESS'))return chatText('บัญชีนี้ยังไม่มีสิทธิ์ MESS ที่ได้รับอนุมัติ กรุณาติดต่อ ADMIN');
  const text=(event.message?.text||'').trim(),postback=event.postback?.data||'';
+ const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
  const call=(action:string,data:unknown={})=>rpc(env,'impjo_api',{p_actor:actorId,p_action:action,p_data:data});
  // Each read and write goes through current SQL role/assignment checks, never a typed role.
  async function assignedBL(id:string){
@@ -55,7 +56,7 @@ export async function messChat(env:Env,event:ChatEvent){
   if(!rows[0])throw new ApiError('NOT_FOUND',404);
   const result=await call('detail',{id:rows[0].job_id}) as unknown as {jobs:ChatJob[]};
   const job=result.jobs[0],bl=job?.bls.find(b=>b.id===id);
-  if(!bl)throw new ApiError('NOT_FOUND',404);
+  if(!bl||!job.job_date||job.job_date>today||(job.job_date<today&&bl.status==='COMPLETED'))throw new ApiError('NOT_FOUND',404);
   return {job,bl};
  }
  const confirm=postback.match(/^mess-confirm:(\d{1,20})$/);
@@ -100,11 +101,11 @@ export async function messChat(env:Env,event:ChatEvent){
  await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_INPUT_CLOSED'});
  const pageMatch=text.match(/^MESS\s+(\d+)$/i),search=text.replace(/^(?:MESS|งาน)\s*/i,'');
  const page=pageMatch?Math.max(1,Math.min(Number(pageMatch[1]),100000)):1;
- const result=await call('list',{page,size:5,status:'IN_PROGRESS',search:pageMatch?'':search}) as unknown as {jobs:ChatJob[];total:number};
- const bls=result.jobs.flatMap(job=>job.bls.filter(bl=>bl.status==='IN_PROGRESS').map(bl=>({job,bl})));
- if(!bls.length)return chatText('ไม่มี B/L ที่กำลังดำเนินการและได้รับมอบหมายให้คุณ\nพิมพ์ MESS เพื่อดูใหม่ หรือให้ ADMIN ตรวจการมอบหมาย');
+ const result=await call('list',{page,size:5,current_only:true,search:pageMatch?'':search}) as unknown as {jobs:ChatJob[];total:number};
+ const bls=result.jobs.flatMap(job=>job.bls.map(bl=>({job,bl})));
+ if(!bls.length)return chatText('ไม่มีงานวันนี้หรืองานค้างที่ได้รับมอบหมายให้คุณ (งานที่ยังไม่กำหนดวันที่ต้องให้ทีมงานระบุวันที่ก่อน)\nพิมพ์ MESS เพื่อดูใหม่ หรือให้ ADMIN ตรวจการมอบหมาย');
  const shown=bls.slice(0,10);
- return chatText(`งาน MESS · หน้า ${page}\n${shown.map(({job,bl})=>job.number+' / '+bl.number).join('\n')}\nเลือก B/L ด้านล่างเพื่อรายงานผล\nค้นหา: MESS ตามด้วยเลข B/L หรือเลข Job${bls.length>10?'\nรายการมากกว่า 10 B/L กรุณาค้นหาให้เฉพาะเจาะจง':''}`,[...shown.map(({bl})=>chatButton(bl.number,'mess-select:'+bl.id)),...(page>1?[{type:'message',label:'หน้าก่อน',text:'MESS '+(page-1)}]:[]),...(page*5<result.total?[{type:'message',label:'หน้าถัดไป',text:'MESS '+(page+1)}]:[])]);
+ return chatText(`งาน MESS · หน้า ${page}\n${shown.map(({job,bl})=>job.number+' / '+bl.number+' · '+chatStatus[bl.status]+' · '+job.job_date).join('\n')}\nเลือก B/L ด้านล่างเพื่อรายงานผล\nค้นหา: MESS ตามด้วยเลข B/L หรือเลข Job${bls.length>10?'\nรายการมากกว่า 10 B/L กรุณาค้นหาให้เฉพาะเจาะจง':''}`,[...shown.map(({bl})=>chatButton(bl.number,'mess-select:'+bl.id)),...(page>1?[{type:'message',label:'หน้าก่อน',text:'MESS '+(page-1)}]:[]),...(page*5<result.total?[{type:'message',label:'หน้าถัดไป',text:'MESS '+(page+1)}]:[])]);
 }
 async function webhook(request:Request,env:Env){
  if(!env.LINE_MESSAGING_CHANNEL_SECRET||!env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN)return json({error:'WEBHOOK_NOT_CONFIGURED'},503);
@@ -176,7 +177,7 @@ export async function onRequest({request,env}:Ctx){try{
    return json({ok:true},200,[cookie('staff','',0),cookie('line','',0)]);
   }
   if(path==='action'){
-   const allowed=['list','detail','dashboard','create','people','approve','assign','assignments','status','audit'];const action=String(data.action||'');if(!allowed.includes(action))throw new ApiError('UNKNOWN_ACTION',404);
+   const allowed=['list','detail','dashboard','create','people','approve','assign','assignments','status','audit','set_job_date'];const action=String(data.action||'');if(!allowed.includes(action))throw new ApiError('UNKNOWN_ACTION',404);
    const id=await actor(request,env);return json(await rpc(env,'impjo_api',{p_actor:id,p_action:action,p_data:data.data&&typeof data.data==='object'?data.data:{}}));
   }
  }
