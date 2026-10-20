@@ -14,6 +14,8 @@ begin
  result:=public.impjo_api(a,'create',jsonb_build_object('job_date',(now() at time zone 'Asia/Bangkok')::date,'contact','QA','phone','000','purpose','QA','bls',jsonb_build_array(jsonb_build_object('number','QA-'||uid,'consignee','QA','destination','QA'))));j:=(result->>'id')::uuid;
  select id into b from public.impjo_bls where job_id=j;
  assert public.impjo_visible_bl(o,b),'OUTSOURCE cannot read all jobs';
+ assert not (public.impjo_api(o,'detail',jsonb_build_object('id',j))->'jobs'->0->'bls'->0->>'can_handover')::boolean,'Read-all user sees unauthorized handover';
+ assert (public.impjo_api(op,'detail',jsonb_build_object('id',j))->'jobs'->0->'bls'->0->>'can_handover')::boolean,'OPERATOR handover capability absent';
  assert not public.impjo_visible_bl(m,b),'Unassigned MESS sees work';
  denied:=false;begin perform public.impjo_api(o,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));exception when insufficient_privilege then denied:=true;end;assert denied,'Unassigned OUTSOURCE wrote status';
  assert (public.impjo_handover_list(o)->>'total')::int=0,'Unassigned OUTSOURCE offered handover';
