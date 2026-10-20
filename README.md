@@ -78,3 +78,9 @@ OPERATOR: sign into LINE Portal once, then sign into the staff website, open /li
 Apply database/team-line.sql and database/outsource-job-visibility.sql, then database/handover-capabilities.sql once after prior migrations; these have already been applied to the live project. RLS and backend-only grants protect link tables. Raw linking codes and channel secrets are never stored in source or browser builds. Audit events identify the mapped acting principal.
 
 Validation: production build, 31 Node tests, team-line SQL tests and existing authorization/operator-handover/job-date SQL regressions passed with transaction fixtures rolled back. Physical LINE account linking/handover requires the account owner to send the command and ADMIN to approve that actual account.
+
+
+## Job management, recoverable accounts and evening reports
+ADMIN can archive/restore accounts; restored accounts require fresh approval. ADMIN/OPERATOR can edit job fields and B/L details, archive/restore jobs, and export a Job Date range to genuine XLSX (one row per B/L, up to 10,000 per download). Existing job numbers, B/L status and assignments are preserved during editing; optimistic version checks prevent lost updates.
+
+Evening LINE reports group by Contact Name / Job OPR, include only today's Job Date, and are scheduled at 17:00 Asia/Bangkok. Automatic delivery is OFF and recipients are empty until ADMIN configures them in /reports. No real report messages have been sent. See [management and reports documentation](docs/management-reports.md) for setup, permission rules, applied migrations, scheduler authentication and validation.

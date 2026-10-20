@@ -12,7 +12,7 @@ async function sb(env:Env,path:string,body?:unknown,auth?:string,method?:string)
  else if(key?.startsWith('eyJ'))headers.Authorization=`Bearer ${key}`;
  const response=await fetch(`${env.SUPABASE_URL}${path}`,{method:method||(body===undefined?'GET':'POST'),headers,body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
  const raw=await response.text();const data=(raw?JSON.parse(raw):{}) as Record<string,unknown>;
- if(!response.ok){const code=String(data.code||'');const known=['AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG','INVALID_JOB_DATE'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')||code==='28000'?401:code==='42501'?403:code==='P0002'?404:400)}
+ if(!response.ok){const code=String(data.code||'');const known=['AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG','INVALID_JOB_DATE','STALE_JOB','JOB_ARCHIVED','BL_REMOVAL_NOT_ALLOWED','INVALID_DATE_RANGE','EXPORT_TOO_LARGE','INVALID_RECIPIENT'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')||code==='28000'?401:code==='42501'?403:code==='P0002'?404:400)}
  return data;
 }
 const rpc=(env:Env,name:string,data:unknown)=>sb(env,`/rest/v1/rpc/${name}`,data);
@@ -44,7 +44,7 @@ export async function messChat(env:Env,event:ChatEvent){
  if(event.source?.type!=='user'||!/^U[0-9a-f]{32}$/.test(subject||''))return chatText('กรุณาใช้แชตส่วนตัวกับ OA');
  const actorId=await rpc(env,'impjo_line_actor',{p_subject:subject}) as unknown as string;
  if(!actorId)return chatText(`กรุณาเข้าสู่ LINE และรอ ADMIN อนุมัติ MESS ก่อน\n${ORIGIN}/portal`);
- const me=await rpc(env,'impjo_api',{p_actor:actorId,p_action:'me',p_data:{}}) as unknown as {kind:string;state:string;roles:string[]};
+ const me=await rpc(env,'impjo_api',{p_actor:actorId,p_action:'me',p_data:{}}) as unknown as {kind:string;state:string;roles:string[];name?:string};
  if(me.kind!=='LINE'||me.state!=='APPROVED'||!me.roles.includes('MESS'))return me.state==='APPROVED'&&me.roles.includes('OUTSOURCE')?chatText('OUTSOURCE\n\nพิมพ์ OUTSOURCE เพื่อดูงานรอส่งมอบ\nข้อมูลทุกงานดูได้บนเว็บ',[{type:'message',label:'ส่งมอบงาน',text:'OUTSOURCE'},{type:'uri',label:'ดูงานทั้งหมด',uri:ORIGIN+'/portal'}]):chatText('บัญชีนี้ยังไม่มีสิทธิ์ MESS ที่ได้รับอนุมัติ กรุณาติดต่อ ADMIN');
  const text=(event.message?.text||'').trim(),postback=event.postback?.data||'';
  const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
@@ -103,9 +103,9 @@ export async function messChat(env:Env,event:ChatEvent){
  const page=pageMatch?Math.max(1,Math.min(Number(pageMatch[1]),100000)):1;
  const result=await call('list',{page,size:5,current_only:true,search:pageMatch?'':search}) as unknown as {jobs:ChatJob[];total:number};
  const bls=result.jobs.flatMap(job=>job.bls.map(bl=>({job,bl})));
- if(!bls.length)return chatText('ไม่มีงานวันนี้หรืองานค้างที่ได้รับมอบหมายให้คุณ (งานที่ยังไม่กำหนดวันที่ต้องให้ทีมงานระบุวันที่ก่อน)\nพิมพ์ MESS เพื่อดูใหม่ หรือให้ ADMIN ตรวจการมอบหมาย');
+ if(!bls.length)return chatText(`MESS · ${me.name||'บัญชีของคุณ'}\n\nไม่มีงานวันนี้หรืองานค้างที่ได้รับมอบหมายให้บัญชีนี้\nงานที่ยังไม่กำหนดวันที่จะไม่แสดง\n\nให้ ADMIN ตรวจชื่อผู้รับมอบหมายบนเว็บ แล้วกดดูงานล่าสุด`,[{type:'message',label:'ดูงานล่าสุด',text:'MESS'}]);
  const shown=bls.slice(0,10);
- return chatText(`งาน MESS · หน้า ${page}\n\n${shown.map(({job,bl},i)=>(i+1)+'. '+job.number+'\nB/L: '+bl.number+'\nวันที่งาน: '+job.job_date+'\nสถานะ: '+chatStatus[bl.status]).join('\n\n')}\n\nเลือก B/L ด้านล่างเพื่อรายงานผล\nค้นหา: MESS ตามด้วยเลข B/L หรือเลข Job${bls.length>10?'\nรายการมากกว่า 10 B/L กรุณาค้นหาให้เฉพาะเจาะจง':''}`,[...shown.map(({bl})=>chatButton(bl.number,'mess-select:'+bl.id)),...(page>1?[{type:'message',label:'หน้าก่อน',text:'MESS '+(page-1)}]:[]),...(page*5<result.total?[{type:'message',label:'หน้าถัดไป',text:'MESS '+(page+1)}]:[])]);
+ return chatText(`งาน MESS · ${me.name||'บัญชีของคุณ'}\nหน้า ${page} · อัปเดต ${new Date().toLocaleString('th-TH',{timeZone:'Asia/Bangkok'})}\nเฉพาะงานที่ได้รับมอบหมายของวันนี้และงานค้าง\n\n${shown.map(({job,bl},i)=>(i+1)+'. '+job.number+'\nB/L: '+bl.number+'\nวันที่งาน: '+job.job_date+'\nสถานะ: '+chatStatus[bl.status]).join('\n\n')}\n\nเลือก B/L ด้านล่างเพื่อรายงานผล\nค้นหา: MESS ตามด้วยเลข B/L หรือเลข Job${bls.length>10?'\nรายการมากกว่า 10 B/L กรุณาค้นหาให้เฉพาะเจาะจง':''}`,[...shown.map(({bl})=>chatButton(bl.number,'mess-select:'+bl.id)),...(page>1?[{type:'message',label:'หน้าก่อน',text:'MESS '+(page-1)}]:[]),...(page*5<result.total?[{type:'message',label:'หน้าถัดไป',text:'MESS '+(page+1)}]:[]),{type:'message',label:'ดูงานล่าสุด',text:'MESS'}]);
 }
 export async function handoverChat(env:Env,event:ChatEvent){
  const subject=event.source?.userId;
@@ -232,6 +232,8 @@ export async function onRequest({request,env}:Ctx){try{
   }
   if(path==='action'){
    const requested=String(data.action||'');
+   if(['edit_job','archive_job','restore_job','archived_jobs','archive_account','restore_account','archived_people','export_jobs'].includes(requested)){const id=await actor(request,env);return json(await rpc(env,'impjo_manage',{p_actor:id,p_action:requested,p_data:data.data||{}}));}
+   if(requested.startsWith('report_')){const op=requested.slice(7);if(!['settings','enabled','recipient','preview'].includes(op))throw new ApiError('UNKNOWN_ACTION',404);const id=await actor(request,env);return json(await rpc(env,'impjo_reports',{p_actor:id,p_action:op,p_data:data.data||{}}));}
    if(requested.startsWith('line_link_')){
     const id=await actor(request,env),op=requested.slice('line_link_'.length);
     if(!['create_code','mine','list','approve','revoke'].includes(op))throw new ApiError('UNKNOWN_ACTION',404);
@@ -244,6 +246,7 @@ export async function onRequest({request,env}:Ctx){try{
    if(action==='approve'&&input.state==='APPROVED'){
     const me=await rpc(env,'impjo_api',{p_actor:id,p_action:'me',p_data:{}}) as unknown as {kind:string;state:string;roles:string[]};
     if(me.kind!=='STAFF'||me.state!=='APPROVED'||!me.roles.includes('ADMIN'))throw new ApiError('ACCESS_DENIED',403);
+    const activeTargets=await sb(env,`/rest/v1/impjo_principals?id=eq.${encodeURIComponent(String(input.id||''))}&archived_at=is.null&select=id`) as unknown as {id:string}[];if(!activeTargets.length)throw new ApiError('NOT_FOUND',404);
     const targets=await sb(env,`/rest/v1/impjo_staff_identities?principal_id=eq.${encodeURIComponent(String(input.id||''))}&select=auth_user_id`) as unknown as {auth_user_id:string}[];
     if(targets[0]){
      if(!['ADMIN','OPERATOR'].includes(String(input.role))||input.id===id)throw new ApiError('ACCESS_DENIED',403);
