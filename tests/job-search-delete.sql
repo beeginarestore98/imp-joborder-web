@@ -1,0 +1,47 @@
+begin;
+set local role service_role;
+do $$
+declare op uuid;m uuid;pending uuid;j1 uuid;j2 uuid;j3 uuid;b1 uuid;b2 uuid;b3 uuid;b4 uuid;outbox uuid;r jsonb;scope text;version timestamptz;denied boolean;today date;
+begin
+ scope:='QA-SEARCH-'||gen_random_uuid()::text;today:=(now() at time zone 'Asia/Bangkok')::date;
+ insert into public.impjo_principals(kind,state,name) values('STAFF','APPROVED','QA SEARCH OP') returning id into op;
+ insert into public.impjo_principals(kind,state,name) values('LINE','APPROVED','QA SEARCH MESS') returning id into m;
+ insert into public.impjo_principals(kind,name) values('STAFF','QA SEARCH PENDING') returning id into pending;
+ insert into public.impjo_roles values(op,'OPERATOR'),(m,'MESS');
+ insert into public.impjo_jobs(contact,phone,purpose,created_by,job_date) values(scope,'000','QA',op,today-1) returning id,updated_at into j1,version;
+ insert into public.impjo_jobs(contact,phone,purpose,created_by,job_date) values(scope,'000','QA',op,today) returning id into j2;
+ insert into public.impjo_jobs(contact,phone,purpose,created_by,job_date) values(scope,'000','QA',op,today+1) returning id into j3;
+ insert into public.impjo_bls(job_id,number,consignee,destination,status) values(j1,scope||'-B1','Alpha'||scope,'QA','IN_PROGRESS') returning id into b1;
+ insert into public.impjo_bls(job_id,number,consignee,destination,status) values(j1,scope||'-B2','Beta'||scope,'QA','COMPLETED') returning id into b2;
+ insert into public.impjo_bls(job_id,number,consignee,destination) values(j2,scope||'-B3','Alpha'||scope,'QA') returning id into b3;
+ insert into public.impjo_bls(job_id,number,consignee,destination) values(j3,scope||'-B4','Gamma'||scope,'QA') returning id into b4;
+ r:=public.impjo_search_jobs(op,jsonb_build_object('search',scope,'size',1,'sort','date_asc'));
+ assert (r->>'total')::int=3 and (r->>'total_bls')::int=4 and jsonb_array_length(r->'jobs')=1,'Totals count only current page';
+ assert r->'jobs'->0->>'id'=j1::text,'Date ascending sort incorrect';
+ r:=public.impjo_search_jobs(op,jsonb_build_object('search',scope,'size',1,'page',2,'sort','date_asc'));assert r->'jobs'->0->>'id'=j2::text,'Pagination incorrect';
+ r:=public.impjo_search_jobs(op,jsonb_build_object('search',scope,'sort','date_desc'));assert r->'jobs'->0->>'id'=j3::text,'Date descending sort incorrect';
+ r:=public.impjo_search_jobs(op,jsonb_build_object('search','Alpha'||scope,'field','consignee'));
+ assert (r->>'total')::int=2 and (r->>'total_bls')::int=2 and jsonb_array_length(r->'jobs'->0->'bls')=1,'Consignee did not filter B/L consistently';
+ r:=public.impjo_search_jobs(op,jsonb_build_object('search',scope,'status','COMPLETED'));assert (r->>'total')::int=1 and (r->>'total_bls')::int=1,'Status count incorrect';
+ r:=public.impjo_search_jobs(op,jsonb_build_object('search',scope||'-B2','field','bl'));assert (r->>'total_bls')::int=1,'B/L search incorrect';
+ r:=public.impjo_search_jobs(op,jsonb_build_object('search',(select number from public.impjo_jobs where id=j1),'field','job'));assert (r->>'total_bls')::int=2,'Job search omitted its B/L';
+ r:=public.impjo_search_jobs(op,jsonb_build_object('search',scope,'from',today,'to',today));assert (r->>'total')::int=1,'Inclusive date range incorrect';
+ r:=public.impjo_search_jobs(m,jsonb_build_object('search',scope));assert (r->>'total')::int=2 and (r->>'total_bls')::int=2,'MESS current-work rules changed';
+ denied:=false;begin perform public.impjo_search_jobs(pending,'{}');exception when insufficient_privilege then denied:=true;end;assert denied,'Pending user read jobs';
+ denied:=false;begin perform public.impjo_delete_job(m,j1,version);exception when insufficient_privilege then denied:=true;end;assert denied,'MESS permanently deleted a job';
+ denied:=false;begin perform public.impjo_delete_job(op,j1,version-interval '1 second');exception when raise_exception then denied:=sqlerrm='STALE_JOB';end;assert denied,'Stale delete succeeded';
+ insert into public.impjo_assignments(bl_id,principal_id,role,assigned_by) values(b1,m,'MESS',op);
+ insert into public.impjo_events(actor_id,action,target_id,detail) values(op,'QA JOB SNAPSHOT',j1,j1::text),(m,'BL_STATUS_CHANGED',b1,'QA deleted issue');
+ insert into public.impjo_report_outbox(report_date,contact_key,contact_name,recipient_id,page,pages,payload) values(today,scope,scope,m,1,1,jsonb_build_object('job_number',(select number from public.impjo_jobs where id=j1))) returning id into outbox;
+ perform public.impjo_delete_job(op,j1,version);
+ assert not exists(select 1 from public.impjo_jobs where id=j1),'Job retained';
+ assert not exists(select 1 from public.impjo_bls where job_id=j1),'B/L retained';
+ assert not exists(select 1 from public.impjo_assignments where bl_id in (b1,b2)),'Assignment retained';
+ assert not exists(select 1 from public.impjo_events where target_id in (j1,b1,b2)),'Job history retained';
+ assert (select payload='{}' and state='CANCELLED' from public.impjo_report_outbox where id=outbox),'Report snapshot retained';
+ assert exists(select 1 from public.impjo_jobs where id=j2),'Other job deleted';
+ r:=public.impjo_search_jobs(op,jsonb_build_object('search',scope));assert (r->>'total')::int=2 and (r->>'total_bls')::int=2,'Delete did not update search counts';
+ assert not has_function_privilege('authenticated','public.impjo_delete_job(uuid,uuid,timestamptz)','EXECUTE'),'Direct client deletion exposed';
+end $$;
+rollback;
+

@@ -14,7 +14,7 @@ async function sb(env:Env,path:string,body?:unknown,auth?:string,method?:string)
  else if(key?.startsWith('eyJ'))headers.Authorization=`Bearer ${key}`;
  const response=await fetch(`${env.SUPABASE_URL}${path}`,{method:method||(body===undefined?'GET':'POST'),headers,body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
  const raw=await response.text();const data=(raw?JSON.parse(raw):{}) as Record<string,unknown>;
- if(!response.ok){const code=String(data.code||'');const known=['ACCOUNT_DELETED','ACCOUNT_DELETE_PENDING','INVITE_UNAVAILABLE','INVALID_INVITE','INVITE_WRONG_ACCOUNT','INVITE_ACCOUNT_HAS_ROLE','INVALID_EMAIL_CODE','AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG','INVALID_JOB_DATE','AMOUNT_REQUIRED','INVALID_AMOUNT','INVALID_CATALOG','STALE_JOB','STALE_STATUS','JOB_ARCHIVED','BL_REMOVAL_NOT_ALLOWED','INVALID_DATE_RANGE','EXPORT_TOO_LARGE','INVALID_RECIPIENT'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')||code==='28000'?401:code==='42501'?403:code==='P0002'?404:400)}
+ if(!response.ok){const code=String(data.code||'');const known=['INVALID_SEARCH_FILTER','ACCOUNT_DELETED','ACCOUNT_DELETE_PENDING','INVITE_UNAVAILABLE','INVALID_INVITE','INVITE_WRONG_ACCOUNT','INVITE_ACCOUNT_HAS_ROLE','INVALID_EMAIL_CODE','AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG','INVALID_JOB_DATE','AMOUNT_REQUIRED','INVALID_AMOUNT','INVALID_CATALOG','STALE_JOB','STALE_STATUS','JOB_ARCHIVED','BL_REMOVAL_NOT_ALLOWED','INVALID_DATE_RANGE','EXPORT_TOO_LARGE','INVALID_RECIPIENT'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')||code==='28000'?401:code==='42501'?403:code==='P0002'?404:400)}
  return data;
 }
 const rpc=(env:Env,name:string,data:unknown)=>sb(env,`/rest/v1/rpc/${name}`,data);
@@ -270,6 +270,8 @@ export async function onRequest({request,env}:Ctx){try{
   }
   if(path==='action'){
    const requested=String(data.action||'');
+   if(requested==='search_jobs')return json(await rpc(env,'impjo_search_jobs',{p_actor:await actor(request,env),p_data:data.data||{}}));
+   if(requested==='delete_job'){const input=data.data&&typeof data.data==='object'?data.data as Record<string,unknown>:{};return json(await rpc(env,'impjo_delete_job',{p_actor:await actor(request,env),p_id:input.id,p_version:input.version}));}
    if(requested==='delete_account'||requested==='account_deletion_list'){
     const id=await actor(request,env);const input=data.data&&typeof data.data==='object'?data.data as Record<string,unknown>:{};
     if(requested==='account_deletion_list')return json(await rpc(env,'impjo_account_admin',{p_actor:id,p_action:'list',p_target:null}));
@@ -296,7 +298,7 @@ export async function onRequest({request,env}:Ctx){try{
     return json(op==='create'?{...result,token}:result);
    }
    if(requested.startsWith('catalog_')){const op=requested.slice(8);if(!['list','save','archive'].includes(op))throw new ApiError('UNKNOWN_ACTION',404);return json(await rpc(env,'impjo_catalog_api',{p_actor:await actor(request,env),p_action:op,p_data:data.data||{}}));}
-   if(['edit_job','archive_job','restore_job','archived_jobs','export_jobs'].includes(requested)){const id=await actor(request,env);return json(await rpc(env,'impjo_manage',{p_actor:id,p_action:requested,p_data:data.data||{}}));}
+   if(['edit_job','archived_jobs','export_jobs'].includes(requested)){const id=await actor(request,env);return json(await rpc(env,'impjo_manage',{p_actor:id,p_action:requested,p_data:data.data||{}}));}
    if(requested.startsWith('report_')){const op=requested.slice(7);if(!['settings','enabled','recipient','preview'].includes(op))throw new ApiError('UNKNOWN_ACTION',404);const id=await actor(request,env);return json(await rpc(env,'impjo_reports',{p_actor:id,p_action:op,p_data:data.data||{}}));}
    if(requested.startsWith('line_link_')){
     const id=await actor(request,env),op=requested.slice('line_link_'.length);
