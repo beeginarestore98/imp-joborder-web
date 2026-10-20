@@ -31,7 +31,7 @@ export function botReply(text:string,liffId:string){
   ?`MESS — อัปเดตสถานะงาน\nเปิดงานที่ได้รับมอบหมาย เลือก B/L แล้วกดรายงานเสร็จสมบูรณ์ หรือรายงานปัญหาพร้อมรายละเอียด\n${portal}\nต้องเข้าสู่ LINE และได้รับอนุมัติ MESS จาก ADMIN ก่อน`
   :command==='OPERATOR'
   ?`OPERATOR — สร้าง Job Order\nเข้าสู่ระบบด้วยอีเมลบัญชีทีมงาน แล้วเปิดฟอร์มสร้างงาน\n${ORIGIN}/operator\nรองรับหลาย B/L และฐานข้อมูลสร้างเลข Job อัตโนมัติ\nหากกำลังใช้บัญชี MESS ให้กดปุ่มเข้าสู่ระบบทีมงานในหน้าฟอร์ม`
-  :`IMP Job Order\nพิมพ์รหัสเริ่มใช้งาน หรือเลือกปุ่มด้านล่าง:\nMESS — ดูงานและอัปเดตสถานะ\n\nOPERATOR — ส่งมอบงาน / สร้าง Job\n\nOUTSOURCE — ส่งมอบงานที่ได้รับมอบหมาย\nรหัสเป็นการเลือกเมนู สิทธิ์จริงตรวจจากบัญชีและงานที่ได้รับมอบหมาย`;
+  :`IMP Job Order\nพิมพ์รหัสเริ่มใช้งาน หรือเลือกปุ่มด้านล่าง:\nMESS — ดูงานและอัปเดตสถานะ\n\nOPERATOR — ส่งมอบงาน / สร้าง Job\n\nOUTSOURCE — ดูงาน / อัปเดตสถานะ\nรหัสเป็นการเลือกเมนู สิทธิ์จริงตรวจจากบัญชีและงานที่ได้รับมอบหมาย`;
  return {type:'text',text:messages,quickReply};
 }
 type ChatEvent={webhookEventId?:string;type:string;replyToken?:string;source?:{type?:string;userId?:string};message?:{type:string;text?:string};postback?:{data?:string}};
@@ -46,7 +46,7 @@ export async function messChat(env:Env,event:ChatEvent){
  const actorId=await rpc(env,'impjo_line_actor',{p_subject:subject}) as unknown as string;
  if(!actorId)return chatText(`กรุณาเข้าสู่ LINE และรอ ADMIN อนุมัติ MESS ก่อน\n${ORIGIN}/portal`);
  const me=await rpc(env,'impjo_api',{p_actor:actorId,p_action:'me',p_data:{}}) as unknown as {kind:string;state:string;roles:string[];name?:string};
- if(me.kind!=='LINE'||me.state!=='APPROVED'||!me.roles.includes('MESS'))return me.state==='APPROVED'&&me.roles.includes('OUTSOURCE')?chatText('OUTSOURCE\n\nพิมพ์ OUTSOURCE เพื่อดูงานรอส่งมอบ\nข้อมูลทุกงานดูได้บนเว็บ',[{type:'message',label:'ส่งมอบงาน',text:'OUTSOURCE'},{type:'uri',label:'ดูงานทั้งหมด',uri:ORIGIN+'/portal'}]):chatText('บัญชีนี้ยังไม่มีสิทธิ์ MESS ที่ได้รับอนุมัติ กรุณาติดต่อ ADMIN');
+ if(me.kind!=='LINE'||me.state!=='APPROVED'||!me.roles.includes('MESS'))return me.state==='APPROVED'&&me.roles.includes('OUTSOURCE')?chatText('OUTSOURCE\n\nพิมพ์ OUTSOURCE เพื่อดูและอัปเดตงาน\nข้อมูลทุกงานดูได้บนเว็บ',[{type:'message',label:'ส่งมอบงาน',text:'OUTSOURCE'},{type:'uri',label:'ดูงานทั้งหมด',uri:ORIGIN+'/portal'}]):chatText('บัญชีนี้ยังไม่มีสิทธิ์ MESS ที่ได้รับอนุมัติ กรุณาติดต่อ ADMIN');
  const text=(event.message?.text||'').trim(),postback=event.postback?.data||'';
  const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
  const call=(action:string,data:unknown={})=>rpc(env,'impjo_api',{p_actor:actorId,p_action:action,p_data:data});
@@ -128,10 +128,6 @@ export async function handoverChat(env:Env,event:ChatEvent){
   if(!rows[0])throw new ApiError('NOT_FOUND',404);
   const result=await call('detail',{id:rows[0].job_id}) as unknown as {jobs:ChatJob[]};
   const job=result.jobs[0],bl=job?.bls.find(b=>b.id===id);if(!bl)throw new ApiError('NOT_FOUND',404);
-  if(mode==='OUTSOURCE'){
-   const assigned=await sb(env,`/rest/v1/impjo_assignments?bl_id=eq.${id}&principal_id=eq.${actorId}&role=eq.OUTSOURCE&revoked_at=is.null&select=id`) as unknown as {id:string}[];
-   if(!assigned.length)throw new ApiError('ACCESS_DENIED',403);
-  }
   return{job,bl};
  }
  const confirmation=postback.match(/^handover-confirm:(OPERATOR|OUTSOURCE):(\d{1,20})$/);
@@ -188,7 +184,7 @@ export async function handoverChat(env:Env,event:ChatEvent){
  const result=await rpc(env,'impjo_handover_list',{p_actor:actorId,p_page:page,p_search:page===1&&!/^\d+$/.test(query)?query:''}) as unknown as {total:number;bls:{id:string;number:string;status:string;job_number:string;job_date:string|null}[]};
  const actions:unknown[]=[...result.bls.map(bl=>chatButton(bl.number,`handover-select:${mode}:${bl.id}`)),...(page>1?[{type:'message',label:'หน้าก่อน',text:mode+' '+(page-1)}]:[]),...(page*5<result.total?[{type:'message',label:'หน้าถัดไป',text:mode+' '+(page+1)}]:[])];
  if(mode==='OPERATOR')actions.push({type:'uri',label:'สร้าง Job Order',uri:ORIGIN+'/operator'});
- return chatText(`อัปเดตสถานะงาน · ${mode}\nหน้า ${page} · ทั้งหมด ${result.total} B/L\n\n${result.bls.length?result.bls.map((bl,i)=>`${i+1}. ${bl.job_number}\nB/L: ${bl.number}\nวันที่งาน: ${bl.job_date||'ยังไม่กำหนด'}\nสถานะ: ${chatStatus[bl.status]}`).join('\n\n'):'ไม่มีงาน'+(mode==='OUTSOURCE'?'ที่ได้รับมอบหมาย':'')}\n\nเลือก B/L ด้านล่างเพื่อเปลี่ยนสถานะ\nค้นหา: ${mode} ตามด้วยเลข Job หรือ B/L`,actions);
+ return chatText(`อัปเดตสถานะงาน · ${mode}\nหน้า ${page} · ทั้งหมด ${result.total} B/L\n\n${result.bls.length?result.bls.map((bl,i)=>`${i+1}. ${bl.job_number}\nB/L: ${bl.number}\nวันที่งาน: ${bl.job_date||'ยังไม่กำหนด'}\nสถานะ: ${chatStatus[bl.status]}`).join('\n\n'):'ไม่พบงาน'}\n\nเลือก B/L ด้านล่างเพื่อเปลี่ยนสถานะ\nค้นหา: ${mode} ตามด้วยเลข Job หรือ B/L`,actions);
 }
 async function webhook(request:Request,env:Env){
  if(!env.LINE_MESSAGING_CHANNEL_SECRET||!env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN)return json({error:'WEBHOOK_NOT_CONFIGURED'},503);
