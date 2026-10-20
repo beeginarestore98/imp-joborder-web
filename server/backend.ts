@@ -14,7 +14,7 @@ async function sb(env:Env,path:string,body?:unknown,auth?:string,method?:string)
  else if(key?.startsWith('eyJ'))headers.Authorization=`Bearer ${key}`;
  const response=await fetch(`${env.SUPABASE_URL}${path}`,{method:method||(body===undefined?'GET':'POST'),headers,body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
  const raw=await response.text();const data=(raw?JSON.parse(raw):{}) as Record<string,unknown>;
- if(!response.ok){const code=String(data.code||'');const known=['INVITE_UNAVAILABLE','INVALID_INVITE','INVITE_WRONG_ACCOUNT','INVITE_ACCOUNT_HAS_ROLE','INVALID_EMAIL_CODE','AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG','INVALID_JOB_DATE','AMOUNT_REQUIRED','INVALID_AMOUNT','INVALID_CATALOG','STALE_JOB','STALE_STATUS','JOB_ARCHIVED','BL_REMOVAL_NOT_ALLOWED','INVALID_DATE_RANGE','EXPORT_TOO_LARGE','INVALID_RECIPIENT'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')||code==='28000'?401:code==='42501'?403:code==='P0002'?404:400)}
+ if(!response.ok){const code=String(data.code||'');const known=['ACCOUNT_DELETED','ACCOUNT_DELETE_PENDING','INVITE_UNAVAILABLE','INVALID_INVITE','INVITE_WRONG_ACCOUNT','INVITE_ACCOUNT_HAS_ROLE','INVALID_EMAIL_CODE','AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG','INVALID_JOB_DATE','AMOUNT_REQUIRED','INVALID_AMOUNT','INVALID_CATALOG','STALE_JOB','STALE_STATUS','JOB_ARCHIVED','BL_REMOVAL_NOT_ALLOWED','INVALID_DATE_RANGE','EXPORT_TOO_LARGE','INVALID_RECIPIENT'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')||code==='28000'?401:code==='42501'?403:code==='P0002'?404:400)}
  return data;
 }
 const rpc=(env:Env,name:string,data:unknown)=>sb(env,`/rest/v1/rpc/${name}`,data);
@@ -270,6 +270,21 @@ export async function onRequest({request,env}:Ctx){try{
   }
   if(path==='action'){
    const requested=String(data.action||'');
+   if(requested==='delete_account'||requested==='account_deletion_list'){
+    const id=await actor(request,env);const input=data.data&&typeof data.data==='object'?data.data as Record<string,unknown>:{};
+    if(requested==='account_deletion_list')return json(await rpc(env,'impjo_account_admin',{p_actor:id,p_action:'list',p_target:null}));
+    const target=String(input.id||'');if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(target))throw new ApiError('NOT_FOUND',404);
+    const pending=await rpc(env,'impjo_account_admin',{p_actor:id,p_action:'prepare',p_target:target}) as unknown as {auth_user_id:string|null;completed:boolean};
+    if(pending.auth_user_id&&!pending.completed){
+     const headers:Record<string,string>={apikey:env.SUPABASE_SERVICE_ROLE_KEY,'Content-Type':'application/json'};
+     if(env.SUPABASE_SERVICE_ROLE_KEY.startsWith('eyJ'))headers.Authorization='Bearer '+env.SUPABASE_SERVICE_ROLE_KEY;
+     try{const res=await fetch(env.SUPABASE_URL+'/auth/v1/admin/users/'+encodeURIComponent(pending.auth_user_id),{method:'DELETE',headers,body:JSON.stringify({should_soft_delete:false}),signal:AbortSignal.timeout(15000)});
+      if(!res.ok){const body=await res.json() as {code?:string};if(res.status!==404||body.code!=='user_not_found')throw new Error('Auth deletion incomplete')}
+     }catch{throw new ApiError('ACCOUNT_DELETE_PENDING',503)}
+    }
+    await rpc(env,'impjo_account_admin',{p_actor:id,p_action:'finish',p_target:target});
+    return json({ok:true,deleted:true});
+   }
    if(requested.startsWith('invite_')){
     const op=requested.slice(7);if(!['create','list','revoke','redeem'].includes(op))throw new ApiError('UNKNOWN_ACTION',404);
     const input=data.data&&typeof data.data==='object'?data.data as Record<string,unknown>:{};
@@ -281,7 +296,7 @@ export async function onRequest({request,env}:Ctx){try{
     return json(op==='create'?{...result,token}:result);
    }
    if(requested.startsWith('catalog_')){const op=requested.slice(8);if(!['list','save','archive'].includes(op))throw new ApiError('UNKNOWN_ACTION',404);return json(await rpc(env,'impjo_catalog_api',{p_actor:await actor(request,env),p_action:op,p_data:data.data||{}}));}
-   if(['edit_job','archive_job','restore_job','archived_jobs','archive_account','restore_account','archived_people','export_jobs'].includes(requested)){const id=await actor(request,env);return json(await rpc(env,'impjo_manage',{p_actor:id,p_action:requested,p_data:data.data||{}}));}
+   if(['edit_job','archive_job','restore_job','archived_jobs','export_jobs'].includes(requested)){const id=await actor(request,env);return json(await rpc(env,'impjo_manage',{p_actor:id,p_action:requested,p_data:data.data||{}}));}
    if(requested.startsWith('report_')){const op=requested.slice(7);if(!['settings','enabled','recipient','preview'].includes(op))throw new ApiError('UNKNOWN_ACTION',404);const id=await actor(request,env);return json(await rpc(env,'impjo_reports',{p_actor:id,p_action:op,p_data:data.data||{}}));}
    if(requested.startsWith('line_link_')){
     const id=await actor(request,env),op=requested.slice('line_link_'.length);
@@ -307,7 +322,9 @@ export async function onRequest({request,env}:Ctx){try{
      }
     }
    }
-   return json(await rpc(env,'impjo_api',{p_actor:id,p_action:action,p_data:input}));
+   const result=await rpc(env,'impjo_api',{p_actor:id,p_action:action,p_data:input});
+   if(action==='approve')return json({...result,confirmed:await rpc(env,'impjo_account_admin',{p_actor:id,p_action:'confirmation',p_target:input.id})});
+   return json(result);
   }
  }
  if(path==='me'&&request.method==='GET')return json(await rpc(env,'impjo_api',{p_actor:await actor(request,env),p_action:'me',p_data:{}}));
