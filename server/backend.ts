@@ -2,6 +2,7 @@ import{messCard}from'./mess-card.ts';
 type Env={SUPABASE_URL:string;SUPABASE_SERVICE_ROLE_KEY:string;SUPABASE_PUBLISHABLE_KEY:string;LINE_LOGIN_CHANNEL_ID:string;LINE_LOGIN_CHANNEL_SECRET:string;LIFF_ID:string;LINE_MESSAGING_CHANNEL_SECRET:string;LINE_MESSAGING_CHANNEL_ACCESS_TOKEN:string};
 type Ctx={request:Request;env:Env;params:Record<string,string|string[]>};
 const ORIGIN='https://imp-joborder-web.pages.dev';
+const loginReturn=(value:string|null)=>value==='/scan'||value==='/invite'?value:'/portal';
 const cookie=(name:string,value:string,age:number)=>`__Host-impjo_${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${age}`;
 const json=(body:unknown,status=200,cookies:string[]=[])=>{const headers=new Headers({'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});for(const c of cookies)headers.append('Set-Cookie',c);return new Response(JSON.stringify(body),{status,headers})};
 class ApiError extends Error{status:number;constructor(message:string,status=400){super(message);this.status=status}}
@@ -13,7 +14,7 @@ async function sb(env:Env,path:string,body?:unknown,auth?:string,method?:string)
  else if(key?.startsWith('eyJ'))headers.Authorization=`Bearer ${key}`;
  const response=await fetch(`${env.SUPABASE_URL}${path}`,{method:method||(body===undefined?'GET':'POST'),headers,body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
  const raw=await response.text();const data=(raw?JSON.parse(raw):{}) as Record<string,unknown>;
- if(!response.ok){const code=String(data.code||'');const known=['AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG','INVALID_JOB_DATE','AMOUNT_REQUIRED','INVALID_AMOUNT','INVALID_CATALOG','STALE_JOB','STALE_STATUS','JOB_ARCHIVED','BL_REMOVAL_NOT_ALLOWED','INVALID_DATE_RANGE','EXPORT_TOO_LARGE','INVALID_RECIPIENT'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')||code==='28000'?401:code==='42501'?403:code==='P0002'?404:400)}
+ if(!response.ok){const code=String(data.code||'');const known=['INVITE_UNAVAILABLE','INVALID_INVITE','INVITE_WRONG_ACCOUNT','INVITE_ACCOUNT_HAS_ROLE','INVALID_EMAIL_CODE','AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG','INVALID_JOB_DATE','AMOUNT_REQUIRED','INVALID_AMOUNT','INVALID_CATALOG','STALE_JOB','STALE_STATUS','JOB_ARCHIVED','BL_REMOVAL_NOT_ALLOWED','INVALID_DATE_RANGE','EXPORT_TOO_LARGE','INVALID_RECIPIENT'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')||code==='28000'?401:code==='42501'?403:code==='P0002'?404:400)}
  return data;
 }
 const rpc=(env:Env,name:string,data:unknown)=>sb(env,`/rest/v1/rpc/${name}`,data);
@@ -28,7 +29,7 @@ export function botReply(text:string,liffId:string){
  const portal=liffId?`https://liff.line.me/${liffId}`:`${ORIGIN}/portal`;
  const quickReply={items:[{type:'action',action:{type:'message',label:'MESS · อัปเดตงาน',text:'MESS'}},{type:'action',action:{type:'message',label:'OPERATOR · ส่งมอบ',text:'OPERATOR'}},{type:'action',action:{type:'message',label:'OUTSOURCE · ส่งมอบ',text:'OUTSOURCE'}}]};
  const messages=command==='MESS'
-  ?`MESS — อัปเดตสถานะงาน\nเปิดงานที่ได้รับมอบหมาย เลือก B/L แล้วกดรายงานเสร็จสมบูรณ์ หรือรายงานปัญหาพร้อมรายละเอียด\n${portal}\nต้องเข้าสู่ LINE และได้รับอนุมัติ MESS จาก ADMIN ก่อน`
+  ?`MESS — อัปเดตสถานะงาน\nเปิดงานที่ได้รับมอบหมาย เลือก B/L แล้วกดรายงานเสร็จสมบูรณ์ หรือรายงานปัญหาพร้อมรายละเอียด\n${portal}\nเข้าสู่ LINE และรับสิทธิ์ MESS จากลิงก์หรือ QR คำเชิญของ ADMIN`
   :command==='OPERATOR'
   ?`OPERATOR — สร้าง Job Order\nเข้าสู่ระบบด้วยอีเมลบัญชีทีมงาน แล้วเปิดฟอร์มสร้างงาน\n${ORIGIN}/operator\nรองรับหลาย B/L และฐานข้อมูลสร้างเลข Job อัตโนมัติ\nหากกำลังใช้บัญชี MESS ให้กดปุ่มเข้าสู่ระบบทีมงานในหน้าฟอร์ม`
   :`IMP Job Order\nพิมพ์รหัสเริ่มใช้งาน หรือเลือกปุ่มด้านล่าง:\nMESS — ดูงานและอัปเดตสถานะ\n\nOPERATOR — ส่งมอบงาน / สร้าง Job\n\nOUTSOURCE — ดูงาน / อัปเดตสถานะ\nรหัสเป็นการเลือกเมนู สิทธิ์จริงตรวจจากบัญชีและงานที่ได้รับมอบหมาย`;
@@ -44,9 +45,9 @@ export async function messChat(env:Env,event:ChatEvent){
  const subject=event.source?.userId;
  if(event.source?.type!=='user'||!/^U[0-9a-f]{32}$/.test(subject||''))return chatText('กรุณาใช้แชตส่วนตัวกับ OA');
  const actorId=await rpc(env,'impjo_line_actor',{p_subject:subject}) as unknown as string;
- if(!actorId)return chatText(`กรุณาเข้าสู่ LINE และรอ ADMIN อนุมัติ MESS ก่อน\n${ORIGIN}/portal`);
+ if(!actorId)return chatText(`กรุณาเข้าสู่ LINE แล้วเปิดลิงก์หรือ QR คำเชิญ MESS จาก ADMIN\n${ORIGIN}/portal`);
  const me=await rpc(env,'impjo_api',{p_actor:actorId,p_action:'me',p_data:{}}) as unknown as {kind:string;state:string;roles:string[];name?:string};
- if(me.kind!=='LINE'||me.state!=='APPROVED'||!me.roles.includes('MESS'))return me.state==='APPROVED'&&me.roles.includes('OUTSOURCE')?chatText('OUTSOURCE\n\nพิมพ์ OUTSOURCE เพื่อดูและอัปเดตงาน\nข้อมูลทุกงานดูได้บนเว็บ',[{type:'message',label:'ส่งมอบงาน',text:'OUTSOURCE'},{type:'uri',label:'ดูงานทั้งหมด',uri:ORIGIN+'/portal'}]):chatText('บัญชีนี้ยังไม่มีสิทธิ์ MESS ที่ได้รับอนุมัติ กรุณาติดต่อ ADMIN');
+ if(me.kind!=='LINE'||me.state!=='APPROVED'||!me.roles.includes('MESS'))return me.state==='APPROVED'&&me.roles.includes('OUTSOURCE')?chatText('OUTSOURCE\n\nพิมพ์ OUTSOURCE เพื่อดูและอัปเดตงาน\nข้อมูลทุกงานดูได้บนเว็บ',[{type:'message',label:'ส่งมอบงาน',text:'OUTSOURCE'},{type:'uri',label:'ดูงานทั้งหมด',uri:ORIGIN+'/portal'}]):chatText('บัญชีนี้ยังไม่มีสิทธิ์ MESS กรุณาเปิดลิงก์หรือ QR คำเชิญจาก ADMIN');
  const text=(event.message?.text||'').trim(),postback=event.postback?.data||'';
  const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
  const call=(action:string,data:unknown={})=>rpc(env,'impjo_api',{p_actor:actorId,p_action:action,p_data:data});
@@ -225,7 +226,7 @@ export async function onRequest({request,env}:Ctx){try{
   if(!env.LINE_LOGIN_CHANNEL_ID||!env.LINE_LOGIN_CHANNEL_SECRET)throw new ApiError('LINE_NOT_CONFIGURED',503);
   const state=random(),nonce=random(),verifier=random();const bytes=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier)));const challenge=btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
   const auth=new URL('https://access.line.me/oauth2/v2.1/authorize');auth.search=new URLSearchParams({response_type:'code',client_id:env.LINE_LOGIN_CHANNEL_ID,redirect_uri:ORIGIN+'/api/line/callback',state,scope:'openid',nonce,code_challenge:challenge,code_challenge_method:'S256',bot_prompt:'normal'}).toString();
-  const headers=new Headers({Location:auth.toString(),'Cache-Control':'no-store'});for(const [k,v] of [['state',state],['nonce',nonce],['verifier',verifier],['next',url.searchParams.get('next')==='/scan'?'/scan':'/portal']])headers.append('Set-Cookie',cookie(k,v,600));return new Response(null,{status:302,headers});
+  const headers=new Headers({Location:auth.toString(),'Cache-Control':'no-store'});for(const [k,v] of [['state',state],['nonce',nonce],['verifier',verifier],['next',loginReturn(url.searchParams.get('next'))]])headers.append('Set-Cookie',cookie(k,v,600));return new Response(null,{status:302,headers});
  }
  if(path==='line/callback'&&request.method==='GET'){
   const state=getCookie(request,'state'),nonce=getCookie(request,'nonce'),verifier=getCookie(request,'verifier');
@@ -235,7 +236,7 @@ export async function onRequest({request,env}:Ctx){try{
   const checked=await fetch('https://api.line.me/oauth2/v2.1/verify',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({id_token:tokens.id_token,client_id:env.LINE_LOGIN_CHANNEL_ID,nonce}),signal:AbortSignal.timeout(10000)});
   const identity=await checked.json() as {iss?:string;aud?:string;exp?:number;sub?:string;nonce?:string};
   if(!checked.ok||identity.iss!=='https://access.line.me'||identity.aud!==env.LINE_LOGIN_CHANNEL_ID||identity.nonce!==nonce||!identity.exp||identity.exp<=Date.now()/1000||!/^U[0-9a-f]{32}$/.test(identity.sub||''))throw new ApiError('INVALID_LINE_TOKEN',401);
-  const s=await lineSession(env,identity.sub!);const headers=new Headers({Location:ORIGIN+(getCookie(request,'next')==='/scan'?'/scan':'/portal'),'Cache-Control':'no-store'});
+  const s=await lineSession(env,identity.sub!);const headers=new Headers({Location:ORIGIN+loginReturn(getCookie(request,'next')),'Cache-Control':'no-store'});
   for(const c of [cookie('line',s.session,28800),cookie('staff','',0),cookie('state','',0),cookie('nonce','',0),cookie('verifier','',0),cookie('next','',0)])headers.append('Set-Cookie',c);
   return new Response(null,{status:302,headers});
  }
@@ -244,6 +245,10 @@ export async function onRequest({request,env}:Ctx){try{
  if(request.method==='POST'){
   if(request.headers.get('origin')!==ORIGIN||request.headers.get('x-imp-client')!=='web')return json({error:'ORIGIN_DENIED'},403);
   const data=await readBody(request);
+  if(path==='invite/inspect'){
+   const token=String(data.token||'');if(!/^[0-9a-f]{64}$/.test(token))throw new ApiError('INVITE_UNAVAILABLE',404);
+   return json(await rpc(env,'impjo_invite',{p_actor:null,p_action:'inspect',p_data:{hash:await digest(token)}}));
+  }
   if(path==='auth/login'){
    const email=String(data.email||'').trim();const password=String(data.password||'');if(email.length>254||password.length>512||!email||!password)throw new ApiError('INVALID_CREDENTIALS');
    const session=await sb(env,'/auth/v1/token?grant_type=password',{email,password},env.SUPABASE_PUBLISHABLE_KEY);
@@ -256,7 +261,7 @@ export async function onRequest({request,env}:Ctx){try{
    const registration=await sb(env,`/auth/v1/signup?redirect_to=${encodeURIComponent(ORIGIN+'/login')}`,{email,password},env.SUPABASE_PUBLISHABLE_KEY);
    const user=registration.user as {id?:string}|undefined;
    if(user?.id)try{await rpc(env,'impjo_register_pending',{p_uid:user.id})}catch{/* Duplicate-signup responses may conceal an existing user. Never grant access here. */}
-   return json({message:'ลงทะเบียนแล้ว กรุณาแจ้ง ADMIN ให้ตรวจสอบตัวตน เปิดใช้งานอีเมลและอนุมัติบทบาทในหน้าเว็บก่อนเข้าสู่ระบบ'});
+   return json({message:'ลงทะเบียนแล้ว กรุณายืนยันอีเมลตามลิงก์ในอีเมล แล้วกลับมาเข้าสู่ระบบและเปิดลิงก์คำเชิญจาก ADMIN เพื่อรับสิทธิ์ทันที'});
   }
   if(path==='auth/logout'){
    const line=getCookie(request,'line');if(line)await sb(env,`/rest/v1/impjo_sessions?token_hash=eq.${await digest(line)}`,{revoked_at:new Date().toISOString()},undefined,'PATCH');
@@ -265,6 +270,16 @@ export async function onRequest({request,env}:Ctx){try{
   }
   if(path==='action'){
    const requested=String(data.action||'');
+   if(requested.startsWith('invite_')){
+    const op=requested.slice(7);if(!['create','list','revoke','redeem'].includes(op))throw new ApiError('UNKNOWN_ACTION',404);
+    const input=data.data&&typeof data.data==='object'?data.data as Record<string,unknown>:{};
+    const id=await actor(request,env);
+    const token=op==='create'?random():op==='redeem'?String(input.token||''):null;
+    if(token!==null&&!/^[0-9a-f]{64}$/.test(token))throw new ApiError('INVITE_UNAVAILABLE',404);
+    const payload=op==='create'?{hash:await digest(token!),kind:input.kind,role:input.role,label:input.label}:op==='redeem'?{hash:await digest(token!)}:{id:input.id};
+    const result=await rpc(env,'impjo_invite',{p_actor:id,p_action:op,p_data:payload});
+    return json(op==='create'?{...result,token}:result);
+   }
    if(requested.startsWith('catalog_')){const op=requested.slice(8);if(!['list','save','archive'].includes(op))throw new ApiError('UNKNOWN_ACTION',404);return json(await rpc(env,'impjo_catalog_api',{p_actor:await actor(request,env),p_action:op,p_data:data.data||{}}));}
    if(['edit_job','archive_job','restore_job','archived_jobs','archive_account','restore_account','archived_people','export_jobs'].includes(requested)){const id=await actor(request,env);return json(await rpc(env,'impjo_manage',{p_actor:id,p_action:requested,p_data:data.data||{}}));}
    if(requested.startsWith('report_')){const op=requested.slice(7);if(!['settings','enabled','recipient','preview'].includes(op))throw new ApiError('UNKNOWN_ACTION',404);const id=await actor(request,env);return json(await rpc(env,'impjo_reports',{p_actor:id,p_action:op,p_data:data.data||{}}));}

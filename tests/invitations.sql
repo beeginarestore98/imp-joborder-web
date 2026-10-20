@@ -1,0 +1,43 @@
+begin;
+set local role service_role;
+do $$
+declare a uuid;b uuid;c uuid;d uuid;i uuid;r jsonb;denied boolean;
+begin
+ insert into public.impjo_principals(kind,state,name) values('STAFF','APPROVED','QA INVITER') returning id into a;
+ insert into public.impjo_roles values(a,'ADMIN');
+ insert into public.impjo_principals(kind,name) values('LINE','QA INVITEE A') returning id into b;
+ insert into public.impjo_principals(kind,name) values('LINE','QA INVITEE B') returning id into c;
+ insert into public.impjo_principals(kind,name) values('STAFF','QA WRONG KIND') returning id into d;
+ insert into public.impjo_line_identities(provider,subject,principal_id) values('QA',b::text,b),('QA',c::text,c);
+ r:=public.impjo_invite(a,'create',jsonb_build_object('hash',repeat('a',64),'label','QA reusable','kind','LINE','role','MESS'));
+ i:=(r->>'id')::uuid;
+ r:=public.impjo_invite(null,'inspect',jsonb_build_object('hash',repeat('a',64)));
+ assert r->>'role'='MESS' and not r ? 'token_hash','Preview exposed credential';
+ denied:=false;begin perform public.impjo_invite(null,'redeem',jsonb_build_object('hash',repeat('a',64)));exception when insufficient_privilege then denied:=true;end;assert denied,'Anonymous redeemed';
+ denied:=false;begin perform public.impjo_invite(d,'redeem',jsonb_build_object('hash',repeat('a',64)));exception when insufficient_privilege then denied:=true;end;assert denied,'Wrong identity kind redeemed';
+ r:=public.impjo_invite(b,'redeem',jsonb_build_object('hash',repeat('a',64),'role','ADMIN'));
+ perform public.impjo_invite(c,'redeem',jsonb_build_object('hash',repeat('a',64)));
+ assert (select count(*) from public.impjo_invitation_uses where invitation_id=i)=2,'Reusable invitation consumed';
+ assert exists(select 1 from public.impjo_roles where principal_id=b and role='MESS'),'Role missing';
+ assert not exists(select 1 from public.impjo_roles where principal_id=b and role='ADMIN'),'Client role trusted';
+ perform public.impjo_invite(b,'redeem',jsonb_build_object('hash',repeat('a',64)));
+ assert (select count(*) from public.impjo_events where actor_id=b and action='INVITATION_REDEEMED')=1,'Replay duplicated audit';
+ assert (select state='APPROVED' from public.impjo_principals where id=b),'Still pending';
+ r:=public.impjo_invite(a,'list');assert strpos(r::text,'token_hash')=0 and strpos(r::text,repeat('a',64))=0,'List leaked bearer hash';
+ denied:=false;begin perform public.impjo_invite(b,'create',jsonb_build_object('hash',repeat('b',64),'kind','LINE','role','ADMIN','label','QA'));exception when insufficient_privilege then denied:=true;end;assert denied,'Nonadmin created invitation';
+ r:=public.impjo_invite(a,'create',jsonb_build_object('hash',repeat('b',64),'kind','LINE','role','OPERATOR','label','QA OP'));
+ denied:=false;begin perform public.impjo_invite(b,'redeem',jsonb_build_object('hash',repeat('b',64)));exception when insufficient_privilege then denied:=true;end;assert denied,'Approved account changed role';
+ update public.impjo_principals set state='DISABLED' where id=c;
+ denied:=false;begin perform public.impjo_invite(c,'redeem',jsonb_build_object('hash',repeat('a',64)));exception when insufficient_privilege then denied:=true;end;assert denied,'Disabled recipient reactivated';
+ update public.impjo_principals set state='PENDING',archived_at=now() where id=c;
+ denied:=false;begin perform public.impjo_invite(c,'redeem',jsonb_build_object('hash',repeat('a',64)));exception when insufficient_privilege then denied:=true;end;assert denied,'Archived recipient reactivated';
+ perform public.impjo_invite(a,'revoke',jsonb_build_object('id',i));
+ denied:=false;begin perform public.impjo_invite(null,'inspect',jsonb_build_object('hash',repeat('a',64)));exception when no_data_found then denied:=true;end;assert denied,'Revoked invitation visible';
+ update public.impjo_principals set state='DISABLED' where id=a;
+ denied:=false;begin perform public.impjo_invite(null,'inspect',jsonb_build_object('hash',repeat('b',64)));exception when no_data_found then denied:=true;end;assert denied,'Disabled creator invitation accepted';
+ assert not has_function_privilege('anon','public.impjo_invite(uuid,text,jsonb)','EXECUTE'),'Anon RPC exposed';
+ assert not has_function_privilege('authenticated','public.impjo_invite(uuid,text,jsonb)','EXECUTE'),'Client RPC exposed';
+ assert not has_table_privilege('authenticated','public.impjo_invitations','SELECT'),'Client token table exposed';
+end $$;
+rollback;
+
