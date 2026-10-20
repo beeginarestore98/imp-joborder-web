@@ -115,10 +115,10 @@ export async function handoverChat(env:Env,event:ChatEvent){
  if(event.source?.type!=='user'||!/^U[0-9a-f]{32}$/.test(subject||''))return chatText('กรุณาใช้แชตส่วนตัวกับ OA');
  const text=(event.message?.text||'').trim(),postback=event.postback?.data||'';
  const mode=(postback.split(':')[1]||text.split(/\s/)[0]).toUpperCase()==='OUTSOURCE'?'OUTSOURCE':'OPERATOR';
- const actorId=await rpc(env,mode==='OPERATOR'?'impjo_chat_staff_actor':'impjo_line_actor',{p_subject:subject}) as unknown as string;
- if(!actorId)return chatText(mode==='OPERATOR'?`ยังไม่ได้ผูกบัญชี OPERATOR\n\n1. เข้าสู่เว็บด้วยอีเมลทีมงาน\n2. เปิด “ผูกบัญชี LINE” และสร้างรหัส\n3. ส่งรหัสในแชตนี้ แล้วรอ ADMIN อนุมัติ\n\n${ORIGIN}/line-link`:`กรุณาเข้าสู่ LINE และให้ ADMIN อนุมัติ OUTSOURCE ก่อน\n\n${ORIGIN}/portal`);
+ const actorId=await rpc(env,mode==='OPERATOR'?'impjo_operator_actor':'impjo_line_actor',{p_subject:subject}) as unknown as string;
+ if(!actorId)return chatText(mode==='OPERATOR'?`ยังไม่มีสิทธิ์ OPERATOR ใน LINE\n\nให้ ADMIN อนุมัติบัญชี LINE เป็น OPERATOR ในเว็บ หรือผูกกับบัญชีทีมงาน:\n1. เข้าสู่เว็บด้วยอีเมลทีมงาน\n2. เปิด “ผูกบัญชี LINE” และสร้างรหัส\n3. ส่งรหัสในแชตนี้ แล้วรอ ADMIN อนุมัติ\n\n${ORIGIN}/line-link`:`กรุณาเข้าสู่ LINE และให้ ADMIN อนุมัติ OUTSOURCE ก่อน\n\n${ORIGIN}/portal`);
  const me=await rpc(env,'impjo_api',{p_actor:actorId,p_action:'me',p_data:{}}) as unknown as {kind:string;state:string;roles:string[]};
- if(me.state!=='APPROVED'||!me.roles.includes(mode)||me.kind!==(mode==='OPERATOR'?'STAFF':'LINE'))return chatText(`บัญชีนี้ยังไม่มีสิทธิ์ ${mode} กรุณาติดต่อ ADMIN`);
+ if(me.state!=='APPROVED'||!me.roles.includes(mode)||(mode==='OUTSOURCE'&&me.kind!=='LINE'))return chatText(`บัญชีนี้ยังไม่มีสิทธิ์ ${mode} กรุณาติดต่อ ADMIN`);
  const call=(action:string,data:unknown={})=>rpc(env,'impjo_api',{p_actor:actorId,p_action:action,p_data:data});
  async function readBL(id:string){
   const rows=await sb(env,`/rest/v1/impjo_bls?id=eq.${encodeURIComponent(id)}&select=job_id`) as unknown as {job_id:string}[];

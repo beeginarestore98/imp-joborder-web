@@ -54,3 +54,10 @@ OPERATOR ส่งมอบผ่านแชตด้วยคำสั่ง O
 
 pg_net เป็น extension ที่จัดการโดยระบบ สิทธิ์ PUBLIC บางส่วนไม่สามารถถอนโดย postgres ได้ จึงไม่ใส่ static scheduler credential ใน HTTP queue ใช้ HMAC proof อายุสั้นและ nonce ที่รับได้ครั้งเดียวแทน ไม่มี secret ใน frontend หรือ repository
 
+## อัปเดต: บัญชี LINE เป็น OPERATOR โดยตรง
+
+ADMIN อนุมัติบัญชี LINE ที่ลงทะเบียนแล้วเป็น OPERATOR ได้ผ่านหน้า ผู้ใช้และสิทธิ์ โดยใช้ principal LINE เดิมและตรวจ webhook signature ทุกครั้ง ไม่ต้องอ้างว่าเป็นบัญชีอีเมลเดียวกันหรือสร้าง staff mapping แทนเจ้าของ บัญชีดังกล่าวดูงานและส่งมอบ PENDING_HANDOVER → IN_PROGRESS ผ่าน LINE/เว็บได้ การสร้างหรือแก้ไข Job ยังคงใช้ฟอร์มบัญชีอีเมลทีมงานตามขอบเขตเดิม ADMIN ยังคงเป็นบัญชีทีมงานอีเมล; การผูก LINE ไม่ยกระดับเป็น ADMIN อัตโนมัติ
+
+Migration line-operator.sql และ transactional test tests/line-operator.sql ใช้งานแล้ว Node tests เพิ่มเป็น 43 tests บัญชี Test - B เปลี่ยนจาก MESS เป็น OPERATOR ตามคำสั่งเจ้าของ การอนุมัติใหม่ถอน sessions และ assignment ของบทบาทเดิมตามนโยบายเดิม ให้ ADMIN มอบหมาย MESS ผู้รับงานก่อนรายงานผล
+
+
