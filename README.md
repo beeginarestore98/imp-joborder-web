@@ -66,3 +66,15 @@ Owner chose to keep staff creation in a web form inside LINE and declined identi
 Applied database/job-date.sql. job_date is a separate DATE business field, required for new jobs. created_at remains the immutable recording timestamp. The owner chose to assign all existing dates manually: legacy job_date stays NULL, with no inferred backfill. ADMIN/OPERATOR may set dates on Job Detail; changes are audited. Form, list, detail and print use Job Date, and detail separately labels recorded time.
 
 MESS current list is filtered in SQL: all assigned jobs dated today in Asia/Bangkok, plus unfinished assigned B/L dated before today. Future jobs, undated legacy jobs and completed older B/L are excluded. Current filtering is forced for MESS list requests, regardless of client-supplied filters. Chat buttons recheck the date window. Run tests/job-date.sql and tests/authorization.sql under service_role; fixtures roll back. Build and 22 Node tests pass.
+
+
+## Team access and LINE handover
+Approved ADMIN, OPERATOR and OUTSOURCE can read all job/B/L data. MESS reads assigned current work only. Account/assignment administration stays ADMIN-only; OUTSOURCE status writes still require its assignment.
+
+New staff registrations appear in People before email confirmation. ADMIN verifies the person and explicitly activates email and role through the existing approval form. This uses server-side Auth Admin confirmation for that mapped app account only; global email confirmation remains enabled.
+
+OPERATOR: sign into LINE Portal once, then sign into the staff website, open /line-link, generate a private one-use code (10 minutes), send the complete LINK message to OA, and ask ADMIN to approve the mapping in People. Type OPERATOR in OA, select a B/L, and confirm handover. OUTSOURCE types OUTSOURCE and selects assigned pending B/L. Both use the existing PENDING_HANDOVER -> IN_PROGRESS transition. New proposals expire in 10 minutes; identity, role, assignment and status are checked again on confirmation. Role/approval changes revoke staff LINE links.
+
+Apply database/team-line.sql and database/outsource-job-visibility.sql once after prior migrations; these have already been applied to the live project. RLS and backend-only grants protect link tables. Raw linking codes and channel secrets are never stored in source or browser builds. Audit events identify the mapped acting principal.
+
+Validation: production build, 31 Node tests, team-line SQL tests and existing authorization/operator-handover/job-date SQL regressions passed with transaction fixtures rolled back. Physical LINE account linking/handover requires the account owner to send the command and ADMIN to approve that actual account.

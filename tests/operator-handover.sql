@@ -18,7 +18,7 @@ begin
  denied:=false;begin perform public.impjo_api(x,'assign',jsonb_build_object('bl_id',b,'role','MESS','principal_id',x));exception when insufficient_privilege then denied:=true;end;assert denied,'Nonadmin assigned work';
  perform public.impjo_api(a,'assign',jsonb_build_object('bl_id',b,'role','OUTSOURCE','principal_id',o));
  perform public.impjo_api(a,'assign',jsonb_build_object('bl_id',b,'role','MESS','principal_id',m));
- assert (public.impjo_api(o,'list')->>'total')::int=1,'Assigned Outsource cannot see work';
+ assert public.impjo_visible_bl(o,b),'Outsource cannot see work';
  denied:=false;begin perform public.impjo_api(m,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));exception when insufficient_privilege then denied:=true;end;assert denied,'MESS started work';
  insert into public.impjo_bls(job_id,number,consignee,destination) values(j,'TEST-OP-HANDOVER','TEST','TEST') returning id into b2;
  perform public.impjo_api(op,'status',jsonb_build_object('bl_id',b2,'status','IN_PROGRESS'));
