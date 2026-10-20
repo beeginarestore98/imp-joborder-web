@@ -16,7 +16,8 @@ begin
  assert (result->'jobs'->0->'bls'->0->>'can_handover')::boolean,'LINE OP handover capability absent';
  perform public.impjo_api(o,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));
  assert exists(select 1 from public.impjo_events where actor_id=o and target_id=b and after_status='IN_PROGRESS'),'LINE actor audit missing';
- denied:=false;begin perform public.impjo_api(o,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));exception when insufficient_privilege then denied:=true;end;assert denied,'OPERATOR completed MESS work';
+ perform public.impjo_api(o,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));
+ perform public.impjo_api(o,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));
  denied:=false;begin perform public.impjo_api(o,'approve',jsonb_build_object('id',a,'role','ADMIN','state','APPROVED'));exception when insufficient_privilege then denied:=true;end;assert denied,'LINE OP escalated another account';
  denied:=false;begin perform public.impjo_api(a,'approve',jsonb_build_object('id',o,'role','ADMIN','state','APPROVED'));exception when invalid_parameter_value then denied:=true;end;assert denied,'LINE silently elevated to staff ADMIN';
  perform public.impjo_api(a,'approve',jsonb_build_object('id',o,'role','OPERATOR','state','DISABLED'));

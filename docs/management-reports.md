@@ -61,3 +61,11 @@ ADMIN อนุมัติบัญชี LINE ที่ลงทะเบี�
 Migration line-operator.sql และ transactional test tests/line-operator.sql ใช้งานแล้ว Node tests เพิ่มเป็น 43 tests บัญชี Test - B เปลี่ยนจาก MESS เป็น OPERATOR ตามคำสั่งเจ้าของ การอนุมัติใหม่ถอน sessions และ assignment ของบทบาทเดิมตามนโยบายเดิม ให้ ADMIN มอบหมาย MESS ผู้รับงานก่อนรายงานผล
 
 
+## อัปเดต: OPERATOR / OUTSOURCE เปลี่ยนได้ทุกสถานะ
+
+เจ้าของยืนยันอนุญาตให้เปิดงานที่ MESS รายงานเสร็จแล้วกลับมาทำใหม่ได้ OPERATOR ทุกงาน และ OUTSOURCE เฉพาะ B/L ที่ได้รับมอบหมาย เปลี่ยนเป็น รอส่งมอบ / กำลังดำเนินการ / พบปัญหา / เสร็จสมบูรณ์ ได้ทั้งเว็บและ LINE มีหน้ายืนยันก่อนบันทึก พบปัญหาต้องมีรายละเอียด ยืนยันเก่าถูกปฏิเสธเมื่อสถานะเปลี่ยน เก็บ Audit Log ผู้กระทำและก่อน–หลังครบ MESS ยังเปลี่ยนเฉพาะ IN_PROGRESS → COMPLETED/ISSUE_REPORTED ของตนเอง
+
+LINE: พิมพ์ OPERATOR หรือ OUTSOURCE → เลือก B/L → เลือกสถานะ → ยืนยันบันทึก หากพบปัญหาให้พิมพ์ OPERATOR ปัญหา รายละเอียด หรือ OUTSOURCE ปัญหา รายละเอียด โดยไม่ต้องพิมพ์เลข B/L
+
+ใช้ migration flexible-status.sql หลัง line-operator.sql; tests/flexible-status.sql ผ่านโดย rollback ข้อมูลทดสอบทั้งหมด ไม่มีการเปลี่ยนสถานะงานจริงระหว่าง QA
+

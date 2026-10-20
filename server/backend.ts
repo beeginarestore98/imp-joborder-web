@@ -12,7 +12,7 @@ async function sb(env:Env,path:string,body?:unknown,auth?:string,method?:string)
  else if(key?.startsWith('eyJ'))headers.Authorization=`Bearer ${key}`;
  const response=await fetch(`${env.SUPABASE_URL}${path}`,{method:method||(body===undefined?'GET':'POST'),headers,body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
  const raw=await response.text();const data=(raw?JSON.parse(raw):{}) as Record<string,unknown>;
- if(!response.ok){const code=String(data.code||'');const known=['AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG','INVALID_JOB_DATE','STALE_JOB','JOB_ARCHIVED','BL_REMOVAL_NOT_ALLOWED','INVALID_DATE_RANGE','EXPORT_TOO_LARGE','INVALID_RECIPIENT'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')||code==='28000'?401:code==='42501'?403:code==='P0002'?404:400)}
+ if(!response.ok){const code=String(data.code||'');const known=['AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG','INVALID_JOB_DATE','STALE_JOB','STALE_STATUS','JOB_ARCHIVED','BL_REMOVAL_NOT_ALLOWED','INVALID_DATE_RANGE','EXPORT_TOO_LARGE','INVALID_RECIPIENT'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')||code==='28000'?401:code==='42501'?403:code==='P0002'?404:400)}
  return data;
 }
 const rpc=(env:Env,name:string,data:unknown)=>sb(env,`/rest/v1/rpc/${name}`,data);
@@ -141,20 +141,49 @@ export async function handoverChat(env:Env,event:ChatEvent){
   await call('status',{bl_id:bl.id,status:'IN_PROGRESS',detail:'ส่งมอบผ่าน LINE ('+mode+')'});
   return chatText(`✅ ส่งมอบงานสำเร็จ\n\nงาน: ${job.number}\nB/L: ${bl.number}\nสถานะ: กำลังดำเนินการ\n\nMESS ที่ได้รับมอบหมายสามารถรายงานผลต่อได้`,[{type:'message',label:'ดูงานรอส่งมอบ',text:mode},{type:'uri',label:'เปิดงานบนเว็บ',uri:ORIGIN+'/jobs/'+job.id}]);
  }
+ const updateConfirm=postback.match(/^handover-update:(OPERATOR|OUTSOURCE):(\d{1,20})$/);
+ if(updateConfirm){
+  const drafts=await sb(env,`/rest/v1/impjo_events?id=eq.${updateConfirm[2]}&actor_id=eq.${actorId}&action=eq.CHAT_PROPOSE_STATUS&select=target_id,detail,created_at`) as unknown as {target_id:string;detail:string;created_at:string}[];
+  const draft=drafts[0];let data:{subject:string;mode:string;status:string;old:string;detail:string}|null=null;
+  try{data=JSON.parse(draft?.detail||'null')}catch{/* An invalid audit payload cannot authorize a write. */}
+  if(!draft||!data||data.subject!==subject||data.mode!==mode||!chatStatus[data.status]||Date.now()-Date.parse(draft.created_at)>600000)return chatText('คำขอยืนยันหมดอายุหรือไม่ถูกต้อง กรุณาพิมพ์ '+mode+' ใหม่');
+  const {job,bl}=await readBL(draft.target_id);
+  if(bl.status!==data.old)return chatText('สถานะเปลี่ยนแล้ว: '+chatStatus[bl.status]+'\nกรุณาเลือกรายการใหม่ ไม่มีการบันทึกทับ');
+  await call('status',{bl_id:bl.id,status:data.status,detail:data.detail,expected_status:data.old});
+  return chatText('✅ อัปเดตสถานะสำเร็จ\n\nงาน: '+job.number+'\nB/L: '+bl.number+'\n'+chatStatus[data.old]+' → '+chatStatus[data.status]+'\n\nบันทึกประวัติและอัปเดตเว็บแล้ว',[{type:'message',label:'ดูรายการล่าสุด',text:mode},{type:'uri',label:'เปิดบนเว็บ',uri:ORIGIN+'/jobs/'+job.id}]);
+ }
  const selection=postback.match(/^handover-select:(OPERATOR|OUTSOURCE):([0-9a-f-]{36})$/);
  if(selection){
   const {job,bl}=await readBL(selection[2]);
-  if(bl.status!=='PENDING_HANDOVER')return chatText('งานนี้ไม่ได้รอส่งมอบแล้ว\nพิมพ์ '+mode+' เพื่อดูรายการล่าสุด');
-  const drafts=await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_PROPOSE_HANDOVER',target_id:bl.id,detail:subject}) as unknown as {id:number}[];
-  if(!drafts[0]?.id)throw new ApiError('SERVICE_UNAVAILABLE',503);
-  return chatText(`ยืนยันส่งมอบงานให้ MESS\n\nงาน: ${job.number}\nB/L: ${bl.number}\nวันที่งาน: ${job.job_date||'ยังไม่กำหนด'}\n\nรอส่งมอบ → กำลังดำเนินการ\nยังไม่บันทึกจนกดยืนยันภายใน 10 นาที`,[chatButton('ยืนยันส่งมอบ',`handover-confirm:${mode}:${drafts[0].id}`),{type:'message',label:'กลับรายการ',text:mode}]);
+  await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_STATUS_INPUT_CLOSED',target_id:bl.id});
+  return chatText(job.number+'\nB/L: '+bl.number+'\nสถานะ: '+chatStatus[bl.status]+(bl.status==='COMPLETED'?'\nงานเสร็จแล้ว สามารถเปิดกลับมาทำต่อได้':'')+'\n\nเลือกสถานะใหม่ด้านล่าง',[...Object.keys(chatStatus).filter(status=>status!==bl.status).map(status=>chatButton(status==='IN_PROGRESS'?'ส่งมอบ / ดำเนินการ':chatStatus[status],'handover-propose:'+mode+':'+status+':'+bl.id)),{type:'message',label:'กลับรายการ',text:mode}]);
  }
+ const proposal=postback.match(/^handover-propose:(OPERATOR|OUTSOURCE):(PENDING_HANDOVER|IN_PROGRESS|COMPLETED|ISSUE_REPORTED):([0-9a-f-]{36})$/);
+ const issue=text.match(/^(?:OPERATOR|OUTSOURCE)\s+ปัญหา\s+([\s\S]+)$/i);
+ let updateId=proposal?.[3],newStatus=proposal?.[2],detail='';
+ if(issue){
+  const prompts=await sb(env,`/rest/v1/impjo_events?actor_id=eq.${actorId}&action=in.(CHAT_STATUS_EXPECT_ISSUE,CHAT_STATUS_INPUT_CLOSED,CHAT_PROPOSE_STATUS)&order=id.desc&limit=1&select=action,target_id,detail,created_at`) as unknown as {action:string;target_id:string;detail:string;created_at:string}[];
+  const prompt=prompts[0];let proof:{subject:string;mode:string}|null=null;try{proof=JSON.parse(prompt?.detail||'null')}catch{}
+  if(!prompt||prompt.action!=='CHAT_STATUS_EXPECT_ISSUE'||proof?.subject!==subject||proof?.mode!==mode||Date.now()-Date.parse(prompt.created_at)>600000)return chatText('กรุณาเลือก B/L แล้วกด พบปัญหา ก่อนส่งรายละเอียด');
+  updateId=prompt.target_id;newStatus='ISSUE_REPORTED';detail=issue[1].trim();
+  if(!detail||detail.length>2000)return chatText('กรุณาระบุรายละเอียดปัญหา 1–2,000 ตัวอักษร');
+ }
+ if(updateId&&newStatus){
+  const {job,bl}=await readBL(updateId);
+  if(bl.status===newStatus)return chatText('รายการนี้มีสถานะ '+chatStatus[bl.status]+' อยู่แล้ว');
+  if(newStatus==='ISSUE_REPORTED'&&!issue){await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_STATUS_EXPECT_ISSUE',target_id:bl.id,detail:JSON.stringify({subject,mode})});return chatText('B/L: '+bl.number+'\n\nพิมพ์ '+mode+' ปัญหา ตามด้วยรายละเอียด\nเช่น '+mode+' ปัญหา เอกสารยังไม่พร้อม\n\nไม่ต้องพิมพ์เลข B/L · หมดอายุใน 10 นาที',[{type:'message',label:'ยกเลิก',text:mode}]);}
+  const drafts=await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_PROPOSE_STATUS',target_id:bl.id,detail:JSON.stringify({subject,mode,status:newStatus,old:bl.status,detail})}) as unknown as {id:number}[];
+  if(!drafts[0]?.id)throw new ApiError('SERVICE_UNAVAILABLE',503);
+  return chatText('ยืนยันเปลี่ยนสถานะ\n\nงาน: '+job.number+'\nB/L: '+bl.number+'\n'+chatStatus[bl.status]+' → '+chatStatus[newStatus]+(bl.status==='COMPLETED'?'\n⚠️ เปิดหรือเปลี่ยนงานที่เสร็จแล้ว':'')+(detail?'\nรายละเอียด: '+detail:'')+'\n\nยังไม่บันทึกจนกดยืนยัน ภายใน 10 นาที',[chatButton('ยืนยันบันทึก','handover-update:'+mode+':'+drafts[0].id),{type:'message',label:'ยกเลิก',text:mode}]);
+ }
+ if(postback.startsWith('handover-'))return chatText('คำสั่งไม่ถูกต้อง กรุณาพิมพ์ '+mode+' ใหม่');
+ await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_STATUS_INPUT_CLOSED'});
  const match=text.match(/^(OPERATOR|OUTSOURCE)(?:\s+(.*))?$/i),query=match?.[2]||'';
  const page=/^\d+$/.test(query)?Math.max(1,Math.min(Number(query),100000)):1;
- const result=await rpc(env,'impjo_handover_list',{p_actor:actorId,p_page:page,p_search:page===1&&!/^\d+$/.test(query)?query:''}) as unknown as {total:number;bls:{id:string;number:string;job_number:string;job_date:string|null}[]};
+ const result=await rpc(env,'impjo_handover_list',{p_actor:actorId,p_page:page,p_search:page===1&&!/^\d+$/.test(query)?query:''}) as unknown as {total:number;bls:{id:string;number:string;status:string;job_number:string;job_date:string|null}[]};
  const actions:unknown[]=[...result.bls.map(bl=>chatButton(bl.number,`handover-select:${mode}:${bl.id}`)),...(page>1?[{type:'message',label:'หน้าก่อน',text:mode+' '+(page-1)}]:[]),...(page*5<result.total?[{type:'message',label:'หน้าถัดไป',text:mode+' '+(page+1)}]:[])];
  if(mode==='OPERATOR')actions.push({type:'uri',label:'สร้าง Job Order',uri:ORIGIN+'/operator'});
- return chatText(`ส่งมอบงาน · ${mode}\nหน้า ${page} · ทั้งหมด ${result.total} B/L\n\n${result.bls.length?result.bls.map((bl,i)=>`${i+1}. ${bl.job_number}\nB/L: ${bl.number}\nวันที่งาน: ${bl.job_date||'ยังไม่กำหนด'}`).join('\n\n'):'ไม่มีงานรอส่งมอบ'+(mode==='OUTSOURCE'?'ที่ได้รับมอบหมาย':'')}\n\nเลือก B/L ด้านล่างเพื่อส่งมอบ\nค้นหา: ${mode} ตามด้วยเลข Job หรือ B/L`,actions);
+ return chatText(`อัปเดตสถานะงาน · ${mode}\nหน้า ${page} · ทั้งหมด ${result.total} B/L\n\n${result.bls.length?result.bls.map((bl,i)=>`${i+1}. ${bl.job_number}\nB/L: ${bl.number}\nวันที่งาน: ${bl.job_date||'ยังไม่กำหนด'}\nสถานะ: ${chatStatus[bl.status]}`).join('\n\n'):'ไม่มีงาน'+(mode==='OUTSOURCE'?'ที่ได้รับมอบหมาย':'')}\n\nเลือก B/L ด้านล่างเพื่อเปลี่ยนสถานะ\nค้นหา: ${mode} ตามด้วยเลข Job หรือ B/L`,actions);
 }
 async function webhook(request:Request,env:Env){
  if(!env.LINE_MESSAGING_CHANNEL_SECRET||!env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN)return json({error:'WEBHOOK_NOT_CONFIGURED'},503);

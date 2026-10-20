@@ -16,11 +16,12 @@ begin
  assert public.impjo_visible_bl(o,b),'OUTSOURCE cannot read all jobs';
  assert not (public.impjo_api(o,'detail',jsonb_build_object('id',j))->'jobs'->0->'bls'->0->>'can_handover')::boolean,'Read-all user sees unauthorized handover';
  assert (public.impjo_api(op,'detail',jsonb_build_object('id',j))->'jobs'->0->'bls'->0->>'can_handover')::boolean,'OPERATOR handover capability absent';
- assert not public.impjo_visible_bl(m,b),'Unassigned MESS sees work';
+ assert public.impjo_visible_bl(m,b),'Approved MESS cannot read shared work';
  denied:=false;begin perform public.impjo_api(o,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));exception when insufficient_privilege then denied:=true;end;assert denied,'Unassigned OUTSOURCE wrote status';
  assert (public.impjo_handover_list(o)->>'total')::int=0,'Unassigned OUTSOURCE offered handover';
  perform public.impjo_api(op,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));
- denied:=false;begin perform public.impjo_api(op,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));exception when insufficient_privilege then denied:=true;end;assert denied,'OPERATOR completed MESS work';
+ perform public.impjo_api(op,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));
+ perform public.impjo_api(op,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));
  assert exists(select 1 from public.impjo_events where actor_id=op and target_id=b and after_status='IN_PROGRESS'),'Handover audit missing';
  perform public.impjo_team_link(op,'create_code',jsonb_build_object('hash',repeat('a',64)));
  perform public.impjo_claim_team_link(subject,repeat('a',64));
@@ -44,3 +45,4 @@ begin
 end $$;
 rollback;
 select 'PASS: global OUTSOURCE reads, assigned writes, MESS isolation, one-use codes, admin approval, Auth ban, role revocation, audit. Fixtures rolled back.' as result;
+

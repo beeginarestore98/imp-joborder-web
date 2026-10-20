@@ -12,7 +12,7 @@ begin
  insert into public.impjo_roles values(op,'OPERATOR');
  result:=public.impjo_api(a,'create',jsonb_build_object('job_date',(now() at time zone 'Asia/Bangkok')::date)||'{"contact":"TEST","phone":"000","purpose":"AUTH TEST","bls":[{"number":"TEST-BL","hbl":"","consignee":"TEST","destination":"TEST"}]}'); j:=(result->>'id')::uuid;
  select id into b from public.impjo_bls where job_id=j;
- assert (public.impjo_api(x,'list')->>'total')::int=0,'Unassigned user leaked jobs';
+ assert public.impjo_visible_bl(x,b),'Approved MESS cannot read shared work';
  denied:=false;begin perform public.impjo_api(p,'list'); exception when insufficient_privilege then denied:=true;end;assert denied,'Pending user read jobs';
  denied:=false;begin perform public.impjo_api(o,'people');exception when insufficient_privilege then denied:=true;end;assert denied,'Outsource read people';
  denied:=false;begin perform public.impjo_api(x,'assign',jsonb_build_object('bl_id',b,'role','MESS','principal_id',x));exception when insufficient_privilege then denied:=true;end;assert denied,'Nonadmin assigned work';
@@ -23,18 +23,20 @@ begin
  insert into public.impjo_bls(job_id,number,consignee,destination) values(j,'TEST-OP-HANDOVER','TEST','TEST') returning id into b2;
  perform public.impjo_api(op,'status',jsonb_build_object('bl_id',b2,'status','IN_PROGRESS'));
  assert exists(select 1 from public.impjo_events where actor_id=op and target_id=b2 and before_status='PENDING_HANDOVER' and after_status='IN_PROGRESS'),'Operator handover audit missing';
- denied:=false;begin perform public.impjo_api(op,'status',jsonb_build_object('bl_id',b2,'status','COMPLETED'));exception when insufficient_privilege then denied:=true;end;assert denied,'Operator completed MESS work';
- denied:=false;begin perform public.impjo_api(op,'status',jsonb_build_object('bl_id',b2,'status','IN_PROGRESS'));exception when insufficient_privilege then denied:=true;end;assert denied,'Duplicate handover accepted';
+ perform public.impjo_api(op,'status',jsonb_build_object('bl_id',b2,'status','COMPLETED'));
+ perform public.impjo_api(op,'status',jsonb_build_object('bl_id',b2,'status','IN_PROGRESS'));
+ assert (public.impjo_api(op,'status',jsonb_build_object('bl_id',b2,'status','IN_PROGRESS'))->>'unchanged')::boolean,'Duplicate changed status';
  update public.impjo_principals set state='DISABLED' where id=op;
  denied:=false;begin perform public.impjo_api(op,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));exception when insufficient_privilege then denied:=true;end;assert denied,'Disabled operator handed over';
  perform public.impjo_api(o,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));
- denied:=false;begin perform public.impjo_api(o,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));exception when insufficient_privilege then denied:=true;end;assert denied,'OUTSOURCE completed work';
- denied:=false;begin perform public.impjo_api(x,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));exception when no_data_found then denied:=true;end;assert denied,'Other MESS changed work';
+ perform public.impjo_api(o,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));
+ perform public.impjo_api(o,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));
+ denied:=false;begin perform public.impjo_api(x,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));exception when insufficient_privilege then denied:=true;end;assert denied,'Other MESS changed work';
  denied:=false;begin perform public.impjo_api(m,'status',jsonb_build_object('bl_id',b,'status','ISSUE_REPORTED','detail',' '));exception when invalid_parameter_value then denied:=true;end;assert denied,'Empty issue accepted';
  perform public.impjo_api(m,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));
  assert exists(select 1 from public.impjo_events where actor_id=m and target_id=b and after_status='COMPLETED'),'Actor audit missing';
  perform public.impjo_api(a,'assign',jsonb_build_object('bl_id',b,'role','MESS','principal_id',null));
- assert (public.impjo_api(m,'list')->>'total')::int=0,'Revocation did not remove work';
+ assert public.impjo_visible_bl(m,b),'Shared read removed after assignment revocation';
  denied:=false;begin perform public.impjo_api(a,'approve',jsonb_build_object('id',o,'role','ADMIN','state','APPROVED'));exception when invalid_parameter_value then denied:=true;end;assert denied,'LINE assigned staff ADMIN';
  assert not has_table_privilege('anon','public.impjo_jobs','SELECT'),'anon can read jobs';
  assert not has_table_privilege('authenticated','public.impjo_jobs','SELECT'),'authenticated bypassed Backend';
@@ -43,3 +45,4 @@ begin
 end $$;
 rollback;
 select 'PASS: assignment isolation, role transitions, issue requirement, audit actor, revocation, no anon/direct RPC access. All test records rolled back.' as result;
+

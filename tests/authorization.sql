@@ -19,7 +19,8 @@ begin
  assert public.impjo_visible_bl(o,b),'Outsource cannot see work';
  denied:=false;begin perform public.impjo_api(m,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));exception when insufficient_privilege then denied:=true;end;assert denied,'MESS started work';
  perform public.impjo_api(o,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));
- denied:=false;begin perform public.impjo_api(o,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));exception when insufficient_privilege then denied:=true;end;assert denied,'OUTSOURCE completed work';
+ perform public.impjo_api(o,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));
+ perform public.impjo_api(o,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));
  denied:=false;begin perform public.impjo_api(x,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));exception when insufficient_privilege then denied:=true;end;assert denied,'Other MESS changed work';
  denied:=false;begin perform public.impjo_api(m,'status',jsonb_build_object('bl_id',b,'status','ISSUE_REPORTED','detail',' '));exception when invalid_parameter_value then denied:=true;end;assert denied,'Empty issue accepted';
  perform public.impjo_api(m,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));
