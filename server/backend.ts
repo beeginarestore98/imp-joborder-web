@@ -34,7 +34,7 @@ export function botReply(text:string,liffId:string){
  return {type:'text',text:messages,quickReply};
 }
 type ChatEvent={webhookEventId?:string;type:string;replyToken?:string;source?:{type?:string;userId?:string};message?:{type:string;text?:string};postback?:{data?:string}};
-type ChatBL={id:string;number:string;status:string};
+type ChatBL={id:string;number:string;status:string;can_report?:boolean};
 type ChatJob={job_date:string|null;id:string;number:string;bls:ChatBL[]};
 const chatText=(text:string,actions:unknown[]=[])=>({type:'text',text,...(actions.length?{quickReply:{items:actions.map(action=>({type:'action',action}))}}:{})});
 const chatButton=(label:string,data:string)=>({type:'postback',label:label.slice(0,20),data});
@@ -68,13 +68,13 @@ export async function messChat(env:Env,event:ChatEvent){
   if(bl.status!=='IN_PROGRESS')return chatText(`B/L ${bl.number} มีสถานะ ${chatStatus[bl.status]} แล้ว ไม่มีการบันทึกซ้ำ\nพิมพ์ MESS เพื่อดูงานล่าสุด`);
   const status=draft.action.slice('CHAT_PROPOSE_'.length);
   await call('status',{bl_id:bl.id,status,detail:draft.detail});
-  return chatText(`✅ บันทึกสำเร็จ\n\nงาน: ${job.number}\nB/L: ${bl.number}\nสถานะ: ${chatStatus[status]}${draft.detail?'\nรายละเอียด: '+draft.detail:''}\n\nอัปเดตข้อมูลบนเว็บแล้ว`,[{type:'message',label:'ดูงานของฉัน',text:'MESS'},{type:'uri',label:'เปิดบนเว็บ',uri:ORIGIN+'/jobs/'+job.id}]);
+  return chatText(`✅ บันทึกสำเร็จ\n\nงาน: ${job.number}\nB/L: ${bl.number}\nสถานะ: ${chatStatus[status]}${draft.detail?'\nรายละเอียด: '+draft.detail:''}\n\nอัปเดตข้อมูลบนเว็บแล้ว`,[{type:'message',label:'เลือก Contact Name',text:'MESS'},{type:'uri',label:'เปิดบนเว็บ',uri:ORIGIN+'/jobs/'+job.id}]);
  }
  const selection=postback.match(/^mess-select:([0-9a-f-]{36})$/);
  if(selection){
   const {job,bl}=await assignedBL(selection[1]);
   await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_INPUT_CLOSED',target_id:bl.id});
-  return chatText(`${job.number}\n\nB/L: ${bl.number}\nสถานะ: ${chatStatus[bl.status]}${bl.status==='IN_PROGRESS'?'\nเลือกรายงานผลด้านล่าง':'\nอัปเดตได้เฉพาะงานที่กำลังดำเนินการ'}`,bl.status==='IN_PROGRESS'?[chatButton('เสร็จสมบูรณ์','mess-propose:COMPLETED:'+bl.id),chatButton('แจ้งปัญหา','mess-issue:'+bl.id)]:[]);
+  return chatText(`${job.number}\n\nB/L: ${bl.number}\nสถานะ: ${chatStatus[bl.status]}${bl.status==='IN_PROGRESS'?(bl.can_report===true?'\nเลือกรายงานผลด้านล่าง':'\nดูข้อมูลได้ · ผู้รับมอบหมายเป็นผู้รายงานผล'):'\nอัปเดตได้เฉพาะงานที่กำลังดำเนินการ'}`,bl.status==='IN_PROGRESS'&&bl.can_report===true?[chatButton('เสร็จสมบูรณ์','mess-propose:COMPLETED:'+bl.id),chatButton('แจ้งปัญหา','mess-issue:'+bl.id)]:[]);
  }
  const issuePrompt=postback.match(/^mess-issue:([0-9a-f-]{36})$/);
  if(issuePrompt){const {bl}=await assignedBL(issuePrompt[1]);if(bl.status!=='IN_PROGRESS')return chatText('รายการนี้ไม่ได้อยู่ระหว่างดำเนินการแล้ว กรุณาพิมพ์ MESS เพื่อดูงานล่าสุด');await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_EXPECT_ISSUE',target_id:bl.id});return chatText(`B/L ${bl.number}\nพิมพ์รายละเอียดปัญหาได้เลย เช่น นัดวันใหม่ (ไม่เกิน 2,000 ตัวอักษร)\nระบบจะให้ยืนยันก่อนบันทึก ไม่ต้องแนบรูป\nขั้นตอนนี้หมดอายุใน 10 นาที พิมพ์ ยกเลิก เพื่อออก`)}
@@ -97,15 +97,18 @@ export async function messChat(env:Env,event:ChatEvent){
   if(!drafts[0]?.id)throw new ApiError('SERVICE_UNAVAILABLE',503);
   return chatText(`ยืนยันรายงานผล\n\nงาน: ${job.number}\nB/L: ${bl.number}\nสถานะใหม่: ${chatStatus[status]}${detail?'\nรายละเอียด: '+detail:''}\n\nยังไม่บันทึกจนกด “ยืนยันบันทึก”\nกรุณายืนยันภายใน 10 นาที`,[chatButton('ยืนยันบันทึก','mess-confirm:'+drafts[0].id),{type:'message',label:'กลับดูงาน',text:'MESS'}]);
  }
- if(postback.startsWith('mess-'))return chatText('คำสั่งไม่ถูกต้อง กรุณาพิมพ์ MESS เพื่อเริ่มใหม่');
+ const contactPage=postback.match(/^mess-contacts:(\d{1,6})$/);
+ const contactJobs=postback.match(/^mess-contact:([0-9a-f-]{36}):(\d{1,6})$/);
+ if(postback&&!contactPage&&!contactJobs)return chatText('คำสั่งไม่ถูกต้อง กรุณาพิมพ์ MESS เพื่อเริ่มใหม่');
  await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_INPUT_CLOSED'});
- const pageMatch=text.match(/^MESS\s+(\d+)$/i),search=text.replace(/^(?:MESS|งาน)\s*/i,'');
- const page=pageMatch?Math.max(1,Math.min(Number(pageMatch[1]),100000)):1;
- const result=await call('list',{page,size:5,current_only:true,search:pageMatch?'':search}) as unknown as {jobs:ChatJob[];total:number};
- const bls=result.jobs.flatMap(job=>job.bls.map(bl=>({job,bl})));
- if(!bls.length)return chatText(`MESS · ${me.name||'บัญชีของคุณ'}\n\nไม่มีงานวันนี้หรืองานค้างที่ได้รับมอบหมายให้บัญชีนี้\nงานที่ยังไม่กำหนดวันที่จะไม่แสดง\n\nให้ ADMIN ตรวจชื่อผู้รับมอบหมายบนเว็บ แล้วกดดูงานล่าสุด`,[{type:'message',label:'ดูงานล่าสุด',text:'MESS'}]);
- const shown=bls.slice(0,10);
- return chatText(`งาน MESS · ${me.name||'บัญชีของคุณ'}\nหน้า ${page} · อัปเดต ${new Date().toLocaleString('th-TH',{timeZone:'Asia/Bangkok'})}\nเฉพาะงานที่ได้รับมอบหมายของวันนี้และงานค้าง\n\n${shown.map(({job,bl},i)=>(i+1)+'. '+job.number+'\nB/L: '+bl.number+'\nวันที่งาน: '+job.job_date+'\nสถานะ: '+chatStatus[bl.status]).join('\n\n')}\n\nเลือก B/L ด้านล่างเพื่อรายงานผล\nค้นหา: MESS ตามด้วยเลข B/L หรือเลข Job${bls.length>10?'\nรายการมากกว่า 10 B/L กรุณาค้นหาให้เฉพาะเจาะจง':''}`,[...shown.map(({bl})=>chatButton(bl.number,'mess-select:'+bl.id)),...(page>1?[{type:'message',label:'หน้าก่อน',text:'MESS '+(page-1)}]:[]),...(page*5<result.total?[{type:'message',label:'หน้าถัดไป',text:'MESS '+(page+1)}]:[]),{type:'message',label:'ดูงานล่าสุด',text:'MESS'}]);
+ if(!contactJobs){
+  const page=contactPage?Math.max(1,Number(contactPage[1])):1;
+  const result=await rpc(env,'impjo_mess_browse',{p_actor:actorId,p_data:{mode:'contacts',page}}) as unknown as {total:number;contacts:{contact:string;key:string;bl_count:number}[]};
+  return chatText('MESS · เลือก Contact Name\n\nงานวันนี้และงานค้างที่ยังไม่เสร็จของทุกคน\n'+(result.contacts.length?result.contacts.map((c,i)=>(i+1)+'. '+c.contact+' · '+c.bl_count+' B/L').join('\n'):'ไม่มีงานปัจจุบัน · งานที่ไม่มีวันที่จะไม่แสดง')+'\n\nกดชื่อด้านล่างเพื่อดูงาน · หน้า '+page,[...result.contacts.map(c=>chatButton(c.contact,'mess-contact:'+c.key+':1')),...(page>1?[chatButton('หน้าก่อน','mess-contacts:'+(page-1))]:[]),...(page*10<result.total?[chatButton('หน้าถัดไป','mess-contacts:'+(page+1))]:[]),{type:'message',label:'รีเฟรชรายชื่อ',text:'MESS'}]);
+ }
+ const key=contactJobs[1],page=Math.max(1,Number(contactJobs[2]));
+ const result=await rpc(env,'impjo_mess_browse',{p_actor:actorId,p_data:{mode:'bls',contact_key:key,page}}) as unknown as {total:number;bls:{id:string;number:string;status:string;job_number:string;job_date:string;contact:string;can_report:boolean}[]};
+ return chatText('Contact: '+(result.bls[0]?.contact||'ไม่พบงานปัจจุบัน')+'\nทั้งหมด '+result.total+' B/L · หน้า '+page+'\n\n'+result.bls.map((b,i)=>(i+1)+'. '+b.job_number+'\nB/L: '+b.number+'\nวันที่งาน: '+b.job_date+'\nสถานะ: '+chatStatus[b.status]+'\n'+(b.can_report?'คุณเป็นผู้รับมอบหมาย':'ดูข้อมูล')).join('\n\n')+'\n\nเลือก B/L เพื่อดูรายละเอียด',[...result.bls.map(b=>chatButton(b.number,'mess-select:'+b.id)),...(page>1?[chatButton('หน้าก่อน','mess-contact:'+key+':'+(page-1))]:[]),...(page*5<result.total?[chatButton('หน้าถัดไป','mess-contact:'+key+':'+(page+1))]:[]),{type:'message',label:'เปลี่ยน Contact',text:'MESS'}]);
 }
 export async function handoverChat(env:Env,event:ChatEvent){
  const subject=event.source?.userId;
@@ -264,3 +267,5 @@ export async function onRequest({request,env}:Ctx){try{
  if(path==='me'&&request.method==='GET')return json(await rpc(env,'impjo_api',{p_actor:await actor(request,env),p_action:'me',p_data:{}}));
  return json({error:'NOT_FOUND'},404);
 }catch(error){if(error instanceof ApiError)return json({error:error.message},error.status);return json({error:'SERVICE_UNAVAILABLE'},503)}}
+
+

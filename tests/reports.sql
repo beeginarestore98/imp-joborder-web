@@ -29,10 +29,11 @@ begin
  perform public.impjo_reports(a,'recipient',jsonb_build_object('contact_name',contact,'recipient_id',m,'enabled',true));
  assert public.impjo_report_destination((item->>'id')::uuid,(item->>'lease')::uuid) is null,'Changed recipient retained queued access';
  perform impjo_private.enqueue_evening_reports(d);
- assert not exists(select 1 from public.impjo_report_outbox where recipient_id=m),'Unassigned MESS received other jobs';
+ assert exists(select 1 from public.impjo_report_outbox where recipient_id=m and contact_key=lower(contact)),'Approved MESS read-all recipient did not receive its configured Contact';
  denied:=false;begin perform public.impjo_reports(o,'settings');exception when insufficient_privilege then denied:=true;end;assert denied,'Nonadmin configured reports';
  assert not has_table_privilege('anon','public.impjo_report_settings','SELECT'),'Anonymous scheduler secret access';
  assert not has_function_privilege('authenticated','public.impjo_report_claim(text)','EXECUTE'),'Public worker RPC access';
 end $$;
 rollback;
-select 'PASS: report opt-in, date/status grouping, all BL pages, daily deduplication, token authentication, recipient/lease revalidation and MESS isolation; no messages sent, fixtures rolled back.' as result;
+select 'PASS: report opt-in, date/status grouping, all BL pages, daily deduplication, token authentication, recipient/lease revalidation and approved MESS shared visibility; no messages sent, fixtures rolled back.' as result;
+
