@@ -1,0 +1,4 @@
+import{test}from'node:test';import assert from'node:assert/strict';import{messCard}from'../server/mess-card.ts';
+test('MESS actions stay inside the Flex card rather than transient quick replies',()=>{const r=messCard({type:'text',text:'เลือก Contact\n\nAlisa',quickReply:{items:[{action:{type:'postback',label:'Alisa',data:'mess-contact:key:1'}}]}});assert.equal(r.type,'flex');assert.equal(r.quickReply,undefined);assert.equal(r.contents.footer.contents[0].action.data,'mess-contact:key:1');assert.equal(r.contents.body.contents[0].wrap,true);assert.ok(JSON.stringify(r).length<30000)});
+test('plain MESS confirmations and long preview text have accessible fallback',()=>{const r=messCard({type:'text',text:'ข้อความ'.repeat(100)});assert.equal(r.altText.length,400);assert.equal(r.contents.footer,undefined);assert.equal(r.contents.header.contents[0].text,'IMP · MESS')});
+

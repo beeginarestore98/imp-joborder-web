@@ -1,3 +1,4 @@
+import{messCard}from'./mess-card.ts';
 type Env={SUPABASE_URL:string;SUPABASE_SERVICE_ROLE_KEY:string;SUPABASE_PUBLISHABLE_KEY:string;LINE_LOGIN_CHANNEL_ID:string;LINE_LOGIN_CHANNEL_SECRET:string;LIFF_ID:string;LINE_MESSAGING_CHANNEL_SECRET:string;LINE_MESSAGING_CHANNEL_ACCESS_TOKEN:string};
 type Ctx={request:Request;env:Env;params:Record<string,string|string[]>};
 const ORIGIN='https://imp-joborder-web.pages.dev';
@@ -12,7 +13,7 @@ async function sb(env:Env,path:string,body?:unknown,auth?:string,method?:string)
  else if(key?.startsWith('eyJ'))headers.Authorization=`Bearer ${key}`;
  const response=await fetch(`${env.SUPABASE_URL}${path}`,{method:method||(body===undefined?'GET':'POST'),headers,body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
  const raw=await response.text();const data=(raw?JSON.parse(raw):{}) as Record<string,unknown>;
- if(!response.ok){const code=String(data.code||'');const known=['AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG','INVALID_JOB_DATE','STALE_JOB','STALE_STATUS','JOB_ARCHIVED','BL_REMOVAL_NOT_ALLOWED','INVALID_DATE_RANGE','EXPORT_TOO_LARGE','INVALID_RECIPIENT'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')||code==='28000'?401:code==='42501'?403:code==='P0002'?404:400)}
+ if(!response.ok){const code=String(data.code||'');const known=['AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG','INVALID_JOB_DATE','AMOUNT_REQUIRED','INVALID_AMOUNT','INVALID_CATALOG','STALE_JOB','STALE_STATUS','JOB_ARCHIVED','BL_REMOVAL_NOT_ALLOWED','INVALID_DATE_RANGE','EXPORT_TOO_LARGE','INVALID_RECIPIENT'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')||code==='28000'?401:code==='42501'?403:code==='P0002'?404:400)}
  return data;
 }
 const rpc=(env:Env,name:string,data:unknown)=>sb(env,`/rest/v1/rpc/${name}`,data);
@@ -77,9 +78,11 @@ export async function messChat(env:Env,event:ChatEvent){
   return chatText(`${job.number}\n\nB/L: ${bl.number}\nสถานะ: ${chatStatus[bl.status]}${bl.status==='IN_PROGRESS'?(bl.can_report===true?'\nเลือกรายงานผลด้านล่าง':'\nกรุณาโหลดรายการใหม่เพื่อตรวจสิทธิ์'):'\nอัปเดตได้เฉพาะงานที่กำลังดำเนินการ'}`,bl.status==='IN_PROGRESS'&&bl.can_report===true?[chatButton('เสร็จสมบูรณ์','mess-propose:COMPLETED:'+bl.id),chatButton('แจ้งปัญหา','mess-issue:'+bl.id)]:[]);
  }
  const issuePrompt=postback.match(/^mess-issue:([0-9a-f-]{36})$/);
- if(issuePrompt){const {bl}=await assignedBL(issuePrompt[1]);if(bl.status!=='IN_PROGRESS')return chatText('รายการนี้ไม่ได้อยู่ระหว่างดำเนินการแล้ว กรุณาพิมพ์ MESS เพื่อดูงานล่าสุด');await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_EXPECT_ISSUE',target_id:bl.id});return chatText(`B/L ${bl.number}\nพิมพ์รายละเอียดปัญหาได้เลย เช่น นัดวันใหม่ (ไม่เกิน 2,000 ตัวอักษร)\nระบบจะให้ยืนยันก่อนบันทึก ไม่ต้องแนบรูป\nขั้นตอนนี้หมดอายุใน 10 นาที พิมพ์ ยกเลิก เพื่อออก`)}
+ if(issuePrompt){const {bl}=await assignedBL(issuePrompt[1]);if(bl.status!=='IN_PROGRESS')return chatText('รายการนี้ไม่ได้อยู่ระหว่างดำเนินการแล้ว กรุณาพิมพ์ MESS เพื่อดูงานล่าสุด');await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_EXPECT_ISSUE',target_id:bl.id});return chatText(`เลือกปัญหา\n\nB/L: ${bl.number}\nกดปัญหาเริ่มต้น หรือพิมพ์รายละเอียดอื่นได้ (ไม่เกิน 2,000 ตัวอักษร)\nระบบจะให้ยืนยันก่อนบันทึก ภายใน 10 นาที`,[chatButton('แจ้งวันนัดใหม่','mess-preset:RESCHEDULE:'+bl.id),chatButton('แก้ไขเอกสาร','mess-preset:DOCUMENT:'+bl.id),{type:'message',label:'ยกเลิก',text:'MESS'}])}
  const complete=postback.match(/^mess-propose:COMPLETED:([0-9a-f-]{36})$/)||text.match(/^(?:เสร็จ|COMPLETED)\s+([0-9a-f-]{36})$/i);
+ const preset=postback.match(/^mess-preset:(RESCHEDULE|DOCUMENT):([0-9a-f-]{36})$/);
  let issue=text.match(/^(?:ปัญหา|ISSUE)\s+([0-9a-f-]{36})(?:\s+([\s\S]*))?$/i);
+ if(preset)issue=['',preset[2],preset[1]==='RESCHEDULE'?'แจ้งวันนัดใหม่':'แก้ไขเอกสาร'] as unknown as RegExpMatchArray;
  if(!postback&&!complete&&!issue&&!/^(?:MESS|งาน)(?:\s|$)/i.test(text)){
   if(/^(?:ยกเลิก|CANCEL)$/i.test(text)){await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_INPUT_CLOSED'});return chatText('ยกเลิกการกรอกรายละเอียดแล้ว พิมพ์ MESS เพื่อดูงาน');}
   const pending=await sb(env,`/rest/v1/impjo_events?actor_id=eq.${actorId}&action=in.(CHAT_EXPECT_ISSUE,CHAT_INPUT_CLOSED,CHAT_PROPOSE_COMPLETED,CHAT_PROPOSE_ISSUE_REPORTED)&order=id.desc&limit=1&select=action,target_id,created_at`) as unknown as {action:string;target_id:string;created_at:string}[];
@@ -159,8 +162,10 @@ export async function handoverChat(env:Env,event:ChatEvent){
   return chatText(job.number+'\nB/L: '+bl.number+'\nสถานะ: '+chatStatus[bl.status]+(bl.status==='COMPLETED'?'\nงานเสร็จแล้ว สามารถเปิดกลับมาทำต่อได้':'')+'\n\nเลือกสถานะใหม่ด้านล่าง',[...Object.keys(chatStatus).filter(status=>status!==bl.status).map(status=>chatButton(status==='IN_PROGRESS'?'ส่งมอบ / ดำเนินการ':chatStatus[status],'handover-propose:'+mode+':'+status+':'+bl.id)),{type:'message',label:'กลับรายการ',text:mode}]);
  }
  const proposal=postback.match(/^handover-propose:(OPERATOR|OUTSOURCE):(PENDING_HANDOVER|IN_PROGRESS|COMPLETED|ISSUE_REPORTED):([0-9a-f-]{36})$/);
+ const statusPreset=postback.match(/^handover-preset:(OPERATOR|OUTSOURCE):(RESCHEDULE|DOCUMENT):([0-9a-f-]{36})$/);
  const issue=text.match(/^(?:OPERATOR|OUTSOURCE)\s+ปัญหา\s+([\s\S]+)$/i);
  let updateId=proposal?.[3],newStatus=proposal?.[2],detail='';
+ if(statusPreset){updateId=statusPreset[3];newStatus='ISSUE_REPORTED';detail=statusPreset[2]==='RESCHEDULE'?'แจ้งวันนัดใหม่':'แก้ไขเอกสาร';}
  if(issue){
   const prompts=await sb(env,`/rest/v1/impjo_events?actor_id=eq.${actorId}&action=in.(CHAT_STATUS_EXPECT_ISSUE,CHAT_STATUS_INPUT_CLOSED,CHAT_PROPOSE_STATUS)&order=id.desc&limit=1&select=action,target_id,detail,created_at`) as unknown as {action:string;target_id:string;detail:string;created_at:string}[];
   const prompt=prompts[0];let proof:{subject:string;mode:string}|null=null;try{proof=JSON.parse(prompt?.detail||'null')}catch{}
@@ -171,7 +176,7 @@ export async function handoverChat(env:Env,event:ChatEvent){
  if(updateId&&newStatus){
   const {job,bl}=await readBL(updateId);
   if(bl.status===newStatus)return chatText('รายการนี้มีสถานะ '+chatStatus[bl.status]+' อยู่แล้ว');
-  if(newStatus==='ISSUE_REPORTED'&&!issue){await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_STATUS_EXPECT_ISSUE',target_id:bl.id,detail:JSON.stringify({subject,mode})});return chatText('B/L: '+bl.number+'\n\nพิมพ์ '+mode+' ปัญหา ตามด้วยรายละเอียด\nเช่น '+mode+' ปัญหา เอกสารยังไม่พร้อม\n\nไม่ต้องพิมพ์เลข B/L · หมดอายุใน 10 นาที',[{type:'message',label:'ยกเลิก',text:mode}]);}
+  if(newStatus==='ISSUE_REPORTED'&&!issue&&!statusPreset){await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_STATUS_EXPECT_ISSUE',target_id:bl.id,detail:JSON.stringify({subject,mode})});return chatText('B/L: '+bl.number+'\n\nเลือกปัญหาเริ่มต้นด้านล่าง หรือพิมพ์ '+mode+' ปัญหา ตามด้วยรายละเอียด\nเช่น '+mode+' ปัญหา เอกสารยังไม่พร้อม\n\nไม่ต้องพิมพ์เลข B/L · หมดอายุใน 10 นาที',[chatButton('แจ้งวันนัดใหม่','handover-preset:'+mode+':RESCHEDULE:'+bl.id),chatButton('แก้ไขเอกสาร','handover-preset:'+mode+':DOCUMENT:'+bl.id),{type:'message',label:'ยกเลิก',text:mode}]);}
   const drafts=await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_PROPOSE_STATUS',target_id:bl.id,detail:JSON.stringify({subject,mode,status:newStatus,old:bl.status,detail})}) as unknown as {id:number}[];
   if(!drafts[0]?.id)throw new ApiError('SERVICE_UNAVAILABLE',503);
   return chatText('ยืนยันเปลี่ยนสถานะ\n\nงาน: '+job.number+'\nB/L: '+bl.number+'\n'+chatStatus[bl.status]+' → '+chatStatus[newStatus]+(bl.status==='COMPLETED'?'\n⚠️ เปิดหรือเปลี่ยนงานที่เสร็จแล้ว':'')+(detail?'\nรายละเอียด: '+detail:'')+'\n\nยังไม่บันทึกจนกดยืนยัน ภายใน 10 นาที',[chatButton('ยืนยันบันทึก','handover-update:'+mode+':'+drafts[0].id),{type:'message',label:'ยกเลิก',text:mode}]);
@@ -208,7 +213,7 @@ async function webhook(request:Request,env:Env){
    }else if(event.postback?.data?.startsWith('handover-')||/^(OPERATOR|OUTSOURCE)(?:\s|$)/i.test(command)){
     try{message=await handoverChat(env,event)}catch(error){if(!(error instanceof ApiError))throw error;message=chatText('ส่งมอบงานไม่สำเร็จ\n\nสถานะ สิทธิ์ หรือการมอบหมายอาจเปลี่ยนไป\nพิมพ์ OPERATOR หรือ OUTSOURCE เพื่อดูข้อมูลล่าสุด')}
    }else if(event.postback?.data?.startsWith('mess-')||(event.type==='message'&&event.message?.type==='text')){
-    try{message=await messChat(env,event)}catch(error){if(!(error instanceof ApiError))throw error;message=chatText(['ACCESS_DENIED','APPROVAL_REQUIRED','NOT_FOUND'].includes(error.message)?'ไม่มีสิทธิ์เข้าถึง B/L นี้ หรือถูกถอนการมอบหมาย กรุณาติดต่อ ADMIN':error.message==='INVALID_STATUS_TRANSITION'?'สถานะงานหรือสิทธิ์เปลี่ยนไปแล้ว กรุณาพิมพ์ MESS เพื่อดูข้อมูลล่าสุด':'ทำรายการไม่สำเร็จ กรุณาพิมพ์ MESS แล้วลองใหม่')}
+    try{message=messCard(await messChat(env,event))}catch(error){if(!(error instanceof ApiError))throw error;message=chatText(['ACCESS_DENIED','APPROVAL_REQUIRED','NOT_FOUND'].includes(error.message)?'ไม่มีสิทธิ์เข้าถึง B/L นี้ หรือถูกถอนการมอบหมาย กรุณาติดต่อ ADMIN':error.message==='INVALID_STATUS_TRANSITION'?'สถานะงานหรือสิทธิ์เปลี่ยนไปแล้ว กรุณาพิมพ์ MESS เพื่อดูข้อมูลล่าสุด':'ทำรายการไม่สำเร็จ กรุณาพิมพ์ MESS แล้วลองใหม่')}
    }
    const reply=await fetch('https://api.line.me/v2/bot/message/reply',{method:'POST',headers:{Authorization:`Bearer ${env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN}`,'Content-Type':'application/json'},body:JSON.stringify({replyToken:event.replyToken,messages:[message]}),signal:AbortSignal.timeout(10000)});
    if(!reply.ok&&reply.status!==400)throw new ApiError('LINE_REPLY_FAILED',503);
@@ -264,6 +269,7 @@ export async function onRequest({request,env}:Ctx){try{
   }
   if(path==='action'){
    const requested=String(data.action||'');
+   if(requested.startsWith('catalog_')){const op=requested.slice(8);if(!['list','save','archive'].includes(op))throw new ApiError('UNKNOWN_ACTION',404);return json(await rpc(env,'impjo_catalog_api',{p_actor:await actor(request,env),p_action:op,p_data:data.data||{}}));}
    if(['edit_job','archive_job','restore_job','archived_jobs','archive_account','restore_account','archived_people','export_jobs'].includes(requested)){const id=await actor(request,env);return json(await rpc(env,'impjo_manage',{p_actor:id,p_action:requested,p_data:data.data||{}}));}
    if(requested.startsWith('report_')){const op=requested.slice(7);if(!['settings','enabled','recipient','preview'].includes(op))throw new ApiError('UNKNOWN_ACTION',404);const id=await actor(request,env);return json(await rpc(env,'impjo_reports',{p_actor:id,p_action:op,p_data:data.data||{}}));}
    if(requested.startsWith('line_link_')){
