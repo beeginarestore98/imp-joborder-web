@@ -74,7 +74,7 @@ export async function messChat(env:Env,event:ChatEvent){
  if(selection){
   const {job,bl}=await assignedBL(selection[1]);
   await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_INPUT_CLOSED',target_id:bl.id});
-  return chatText(`${job.number}\n\nB/L: ${bl.number}\nสถานะ: ${chatStatus[bl.status]}${bl.status==='IN_PROGRESS'?(bl.can_report===true?'\nเลือกรายงานผลด้านล่าง':'\nดูข้อมูลได้ · ผู้รับมอบหมายเป็นผู้รายงานผล'):'\nอัปเดตได้เฉพาะงานที่กำลังดำเนินการ'}`,bl.status==='IN_PROGRESS'&&bl.can_report===true?[chatButton('เสร็จสมบูรณ์','mess-propose:COMPLETED:'+bl.id),chatButton('แจ้งปัญหา','mess-issue:'+bl.id)]:[]);
+  return chatText(`${job.number}\n\nB/L: ${bl.number}\nสถานะ: ${chatStatus[bl.status]}${bl.status==='IN_PROGRESS'?(bl.can_report===true?'\nเลือกรายงานผลด้านล่าง':'\nกรุณาโหลดรายการใหม่เพื่อตรวจสิทธิ์'):'\nอัปเดตได้เฉพาะงานที่กำลังดำเนินการ'}`,bl.status==='IN_PROGRESS'&&bl.can_report===true?[chatButton('เสร็จสมบูรณ์','mess-propose:COMPLETED:'+bl.id),chatButton('แจ้งปัญหา','mess-issue:'+bl.id)]:[]);
  }
  const issuePrompt=postback.match(/^mess-issue:([0-9a-f-]{36})$/);
  if(issuePrompt){const {bl}=await assignedBL(issuePrompt[1]);if(bl.status!=='IN_PROGRESS')return chatText('รายการนี้ไม่ได้อยู่ระหว่างดำเนินการแล้ว กรุณาพิมพ์ MESS เพื่อดูงานล่าสุด');await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_EXPECT_ISSUE',target_id:bl.id});return chatText(`B/L ${bl.number}\nพิมพ์รายละเอียดปัญหาได้เลย เช่น นัดวันใหม่ (ไม่เกิน 2,000 ตัวอักษร)\nระบบจะให้ยืนยันก่อนบันทึก ไม่ต้องแนบรูป\nขั้นตอนนี้หมดอายุใน 10 นาที พิมพ์ ยกเลิก เพื่อออก`)}
@@ -108,7 +108,7 @@ export async function messChat(env:Env,event:ChatEvent){
  }
  const key=contactJobs[1],page=Math.max(1,Number(contactJobs[2]));
  const result=await rpc(env,'impjo_mess_browse',{p_actor:actorId,p_data:{mode:'bls',contact_key:key,page}}) as unknown as {total:number;bls:{id:string;number:string;status:string;job_number:string;job_date:string;contact:string;can_report:boolean}[]};
- return chatText('Contact: '+(result.bls[0]?.contact||'ไม่พบงานปัจจุบัน')+'\nทั้งหมด '+result.total+' B/L · หน้า '+page+'\n\n'+result.bls.map((b,i)=>(i+1)+'. '+b.job_number+'\nB/L: '+b.number+'\nวันที่งาน: '+b.job_date+'\nสถานะ: '+chatStatus[b.status]+'\n'+(b.can_report?'คุณเป็นผู้รับมอบหมาย':'ดูข้อมูล')).join('\n\n')+'\n\nเลือก B/L เพื่อดูรายละเอียด',[...result.bls.map(b=>chatButton(b.number,'mess-select:'+b.id)),...(page>1?[chatButton('หน้าก่อน','mess-contact:'+key+':'+(page-1))]:[]),...(page*5<result.total?[chatButton('หน้าถัดไป','mess-contact:'+key+':'+(page+1))]:[]),{type:'message',label:'เปลี่ยน Contact',text:'MESS'}]);
+ return chatText('Contact: '+(result.bls[0]?.contact||'ไม่พบงานปัจจุบัน')+'\nทั้งหมด '+result.total+' B/L · หน้า '+page+'\n\n'+result.bls.map((b,i)=>(i+1)+'. '+b.job_number+'\nB/L: '+b.number+'\nวันที่งาน: '+b.job_date+'\nสถานะ: '+chatStatus[b.status]+'\n'+(b.can_report?'MESS ทุกคนรายงานผลได้':'ดูข้อมูล')).join('\n\n')+'\n\nเลือก B/L เพื่อดูรายละเอียด',[...result.bls.map(b=>chatButton(b.number,'mess-select:'+b.id)),...(page>1?[chatButton('หน้าก่อน','mess-contact:'+key+':'+(page-1))]:[]),...(page*5<result.total?[chatButton('หน้าถัดไป','mess-contact:'+key+':'+(page+1))]:[]),{type:'message',label:'เปลี่ยน Contact',text:'MESS'}]);
 }
 export async function handoverChat(env:Env,event:ChatEvent){
  const subject=event.source?.userId;
@@ -139,7 +139,7 @@ export async function handoverChat(env:Env,event:ChatEvent){
   const {job,bl}=await readBL(draft.target_id);
   if(bl.status!=='PENDING_HANDOVER')return chatText(`B/L: ${bl.number}\nสถานะ: ${chatStatus[bl.status]}\n\nไม่มีการบันทึกซ้ำ`,[{type:'message',label:'ดูงานรอส่งมอบ',text:mode}]);
   await call('status',{bl_id:bl.id,status:'IN_PROGRESS',detail:'ส่งมอบผ่าน LINE ('+mode+')'});
-  return chatText(`✅ ส่งมอบงานสำเร็จ\n\nงาน: ${job.number}\nB/L: ${bl.number}\nสถานะ: กำลังดำเนินการ\n\nMESS ที่ได้รับมอบหมายสามารถรายงานผลต่อได้`,[{type:'message',label:'ดูงานรอส่งมอบ',text:mode},{type:'uri',label:'เปิดงานบนเว็บ',uri:ORIGIN+'/jobs/'+job.id}]);
+  return chatText(`✅ ส่งมอบงานสำเร็จ\n\nงาน: ${job.number}\nB/L: ${bl.number}\nสถานะ: กำลังดำเนินการ\n\nMESS ที่อนุมัติแล้วทุกคนสามารถรายงานผลต่อได้`,[{type:'message',label:'ดูงานรอส่งมอบ',text:mode},{type:'uri',label:'เปิดงานบนเว็บ',uri:ORIGIN+'/jobs/'+job.id}]);
  }
  const updateConfirm=postback.match(/^handover-update:(OPERATOR|OUTSOURCE):(\d{1,20})$/);
  if(updateConfirm){
