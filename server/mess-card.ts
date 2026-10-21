@@ -1,6 +1,6 @@
 export type CardAction={type:string;label?:string;data?:string;text?:string;uri?:string};
-export type WorkItem={jobNumber:string;blNumber:string;status:string;jobDate?:string|null;action?:CardAction};
-export type CardPresentation={role?:string;items?:WorkItem[];current?:WorkItem;nextStatus?:string};
+export type WorkItem={jobNumber:string;blNumber:string;status:string;jobDate?:string|null;contact?:string;destination?:string;purpose?:string;amount?:number|null;action?:CardAction};
+export type CardPresentation={role?:string;summary?:string;items?:WorkItem[];current?:WorkItem;nextStatus?:string};
 type ChatMessage={type:string;text:string;quickReply?:{items:{action:unknown}[]};presentation?:CardPresentation};
 const yellow='#FFCC00',black='#171717',red='#C71920',white='#FFFFFF',gray='#E7E7E2';
 const labels:Record<string,string>={PENDING_HANDOVER:'รอส่งมอบ',IN_PROGRESS:'กำลังดำเนินการ',COMPLETED:'เสร็จสมบูรณ์',ISSUE_REPORTED:'แจ้งปัญหา'};
@@ -29,6 +29,10 @@ function bubble(heading:string,body:unknown[],actions:CardAction[],role:string){
 function itemBody(item:WorkItem){return[
  {...text(item.jobNumber,'sm','#6B5700'),weight:'bold'},text('B/L','xs','#666666'),{...text(item.blNumber,'lg'),weight:'bold'},
  ...(item.jobDate?[text('วันที่งาน: '+formatDate(item.jobDate),'xs','#666666')]:[]),
+ ...(item.contact?[text('Contact Name: '+item.contact,'sm')]:[]),
+ ...(item.destination?[text('Destination: '+item.destination,'sm')]:[]),
+ ...(item.purpose?[text('วัตถุประสงค์: '+item.purpose,'sm')]:[]),
+ ...(item.amount!=null?[text('ยอดเงิน: '+Number(item.amount).toLocaleString('th-TH')+' บาท','sm')]:[]),
  {type:'box',layout:'vertical',backgroundColor:item.status==='ISSUE_REPORTED'?'#FFF0F0':item.status==='COMPLETED'?black:'#FFF6CE',paddingAll:'10px',cornerRadius:'6px',contents:[{...text(labels[item.status]||'ไม่ทราบสถานะ','sm',item.status==='ISSUE_REPORTED'?red:item.status==='COMPLETED'?white:black),weight:'bold'}]},
  workProgress(item.status)
 ]}
@@ -42,7 +46,7 @@ export function messCard(message:ChatMessage,fallbackRole='MESS'){
   const keys=new Set(items.map(i=>i.action?.data||i.action?.text||i.action?.uri).filter(Boolean));
   const navigation=actions.filter(a=>!keys.has(a.data||a.text||a.uri));
   const cards=items.map(i=>bubble('ความคืบหน้างาน',itemBody(i),i.action?[{...i.action,label:'ดูรายละเอียด / อัปเดต'}]:[],role));
-  if(navigation.length)cards.push(bubble('รายการงานเพิ่มเติม',[text(heading||'รายการงาน'),text('เลื่อนการ์ดเพื่อดูแต่ละ B/L หรือเลือกเมนูด้านล่าง','sm','#666666')],navigation,role));
+  if(navigation.length)cards.push(bubble('รายการงานเพิ่มเติม',[text(presentation.summary||heading||'รายการงาน'),text('เลื่อนการ์ดเพื่อดูแต่ละ B/L หรือเลือกเมนูด้านล่าง','sm','#666666')],navigation,role));
   return{...base,contents:cards.length===1?cards[0]:{type:'carousel',contents:cards}};
  }
  const body:unknown[]=[text(lines.join('\n').trim()||'กรุณาเลือกดำเนินการจากเมนูด้านล่าง')];
@@ -52,4 +56,3 @@ export function messCard(message:ChatMessage,fallbackRole='MESS'){
  }
  return{...base,contents:bubble(heading||'ข้อมูลการปฏิบัติงาน',body,actions,role)};
 }
-

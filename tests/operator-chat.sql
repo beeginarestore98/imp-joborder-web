@@ -1,0 +1,35 @@
+begin;
+set local role service_role;
+do $$
+declare a uuid;m uuid;j uuid;b uuid;c uuid;subject text:='U'||replace(gen_random_uuid()::text,'-','');key text:=md5(lower('QA OP BATCH'));r jsonb;draft text;proposal text;denied boolean;
+begin
+ insert into public.impjo_principals(kind,state,name) values('LINE','APPROVED','QA OP BATCH') returning id into a;
+ insert into public.impjo_roles values(a,'OPERATOR');
+ insert into public.impjo_line_identities(provider,subject,principal_id) values('2005629037',subject,a);
+ insert into public.impjo_jobs(contact,phone,purpose,amount,created_by,job_date) values('QA OP BATCH','000','ตามใบเสร็จ',100,a,current_date) returning id into j;
+ insert into public.impjo_bls(job_id,number,consignee,destination) values(j,'QA-OP-BATCH-A','QA','QA Shipping') returning id into b;
+ insert into public.impjo_bls(job_id,number,consignee,destination) values(j,'QA-OP-BATCH-B','QA','QA Shipping') returning id into c;
+ r:=public.impjo_operator_chat(a,subject,'bls',jsonb_build_object('key',key));
+ assert (r->>'total')::int=2,'Missing B/L';assert r->'bls'->0->>'destination'='QA Shipping','Missing destination';
+ assert (r->'purpose_summary'->0->>'jobs')::int=1,'Purpose counts duplicated Jobs';assert (r->'purpose_summary'->0->>'amount')::numeric=100,'Money counted per BL';
+ r:=public.impjo_operator_chat(a,subject,'start',jsonb_build_object('key',key));draft:=r->>'draft';
+ r:=public.impjo_operator_chat(a,subject,'toggle',jsonb_build_object('draft',draft,'bl_id',b));draft:=r->>'draft';
+ r:=public.impjo_operator_chat(a,subject,'toggle',jsonb_build_object('draft',draft,'bl_id',c));draft:=r->>'draft';
+ assert jsonb_array_length(r->'selected')=2,'Selection lost';
+ r:=public.impjo_operator_chat(a,subject,'propose',jsonb_build_object('draft',draft,'status','IN_PROGRESS'));proposal:=r->>'draft';
+ assert (select bool_and(status='PENDING_HANDOVER') from public.impjo_bls where job_id=j),'Proposal wrote status';
+ r:=public.impjo_operator_chat(a,subject,'confirm',jsonb_build_object('draft',proposal));assert (r->>'changed')::int=2,'Batch incomplete';
+ assert (select count(*) from public.impjo_events where actor_id=a and action='BL_STATUS_CHANGED' and target_id in(b,c))=2,'Missing per-BL audit';
+ denied:=false;begin perform public.impjo_operator_chat(a,subject,'confirm',jsonb_build_object('draft',proposal));exception when sqlstate '22023' then denied:=true;end;assert denied,'Replay accepted';
+ r:=public.impjo_operator_chat(a,subject,'propose',jsonb_build_object('draft',draft,'status','COMPLETED'));proposal:=r->>'draft';
+ perform public.impjo_api(a,'status',jsonb_build_object('bl_id',c,'status','ISSUE_REPORTED','detail','QA stale'));
+ denied:=false;begin perform public.impjo_operator_chat(a,subject,'confirm',jsonb_build_object('draft',proposal));exception when sqlstate '22023' then denied:=true;end;assert denied,'Stale batch accepted';
+ assert (select status from public.impjo_bls where id=b)='IN_PROGRESS','Atomic rollback failed';
+ denied:=false;begin perform public.impjo_operator_chat(a,'U'||repeat('0',32),'page',jsonb_build_object('draft',draft));exception when insufficient_privilege then denied:=true;end;assert denied,'Wrong LINE accepted';
+ update public.impjo_principals set state='DISABLED' where id=a;
+ denied:=false;begin perform public.impjo_operator_chat(a,subject,'contacts');exception when insufficient_privilege then denied:=true;end;assert denied,'Disabled operator accepted';
+ update public.impjo_principals set state='APPROVED' where id=a;update public.impjo_roles set role='MESS' where principal_id=a;
+ denied:=false;begin perform public.impjo_operator_chat(a,subject,'contacts');exception when insufficient_privilege then denied:=true;end;assert denied,'MESS accessed OPERATOR batch';
+end $$;
+rollback;
+select 'PASS: grouped totals, multi-select, no premature write, atomic stale rejection, per-BL audits, replay, wrong LINE, disabled and MESS denial; all fixtures rolled back' as result;

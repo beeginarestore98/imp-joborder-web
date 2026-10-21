@@ -1,3 +1,4 @@
+import{operatorBrowse}from'./operator-chat.ts';
 import{messCard,type CardPresentation}from'./mess-card.ts';
 type Env={SUPABASE_URL:string;SUPABASE_SERVICE_ROLE_KEY:string;SUPABASE_PUBLISHABLE_KEY:string;LINE_LOGIN_CHANNEL_ID:string;LINE_LOGIN_CHANNEL_SECRET:string;LIFF_ID:string;LINE_MESSAGING_CHANNEL_SECRET:string;LINE_MESSAGING_CHANNEL_ACCESS_TOKEN:string};
 type Ctx={request:Request;env:Env;params:Record<string,string|string[]>};
@@ -14,7 +15,7 @@ async function sb(env:Env,path:string,body?:unknown,auth?:string,method?:string)
  else if(key?.startsWith('eyJ'))headers.Authorization=`Bearer ${key}`;
  const response=await fetch(`${env.SUPABASE_URL}${path}`,{method:method||(body===undefined?'GET':'POST'),headers,body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
  const raw=await response.text();const data=(raw?JSON.parse(raw):{}) as Record<string,unknown>;
- if(!response.ok){const code=String(data.code||'');const known=['INVALID_SEARCH_FILTER','ACCOUNT_DELETED','ACCOUNT_DELETE_PENDING','INVITE_UNAVAILABLE','INVALID_INVITE','INVITE_WRONG_ACCOUNT','INVITE_ACCOUNT_HAS_ROLE','INVALID_EMAIL_CODE','AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG','INVALID_JOB_DATE','AMOUNT_REQUIRED','INVALID_AMOUNT','INVALID_CATALOG','STALE_JOB','STALE_STATUS','JOB_ARCHIVED','BL_REMOVAL_NOT_ALLOWED','INVALID_DATE_RANGE','EXPORT_TOO_LARGE','INVALID_RECIPIENT'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')||code==='28000'?401:code==='42501'?403:code==='P0002'?404:400)}
+ if(!response.ok){const code=String(data.code||'');const known=['INVALID_SEARCH_FILTER','ACCOUNT_DELETED','ACCOUNT_DELETE_PENDING','INVITE_UNAVAILABLE','INVALID_INVITE','INVITE_WRONG_ACCOUNT','INVITE_ACCOUNT_HAS_ROLE','INVALID_EMAIL_CODE','AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG','INVALID_JOB_DATE','AMOUNT_REQUIRED','INVALID_AMOUNT','INVALID_CATALOG','STALE_JOB','STALE_STATUS','JOB_ARCHIVED','BL_REMOVAL_NOT_ALLOWED','INVALID_DATE_RANGE','EXPORT_TOO_LARGE','INVALID_RECIPIENT','CHAT_EXPIRED','BATCH_LIMIT','INVALID_BATCH'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')||code==='28000'?401:code==='42501'?403:code==='P0002'?404:400)}
  return data;
 }
 const rpc=(env:Env,name:string,data:unknown)=>sb(env,`/rest/v1/rpc/${name}`,data);
@@ -36,8 +37,8 @@ export function botReply(text:string,liffId:string){
  return {type:'text',text:messages,quickReply};
 }
 type ChatEvent={webhookEventId?:string;type:string;replyToken?:string;source?:{type?:string;userId?:string};message?:{type:string;text?:string};postback?:{data?:string}};
-type ChatBL={id:string;number:string;status:string;can_report?:boolean};
-type ChatJob={job_date:string|null;id:string;number:string;bls:ChatBL[]};
+type ChatBL={id:string;number:string;status:string;destination?:string;can_report?:boolean};
+type ChatJob={job_date:string|null;id:string;number:string;contact?:string;purpose?:string;amount?:number|null;bls:ChatBL[]};
 const chatText=(text:string,actions:unknown[]=[],presentation?:CardPresentation)=>({type:'text',text,...(presentation?{presentation}:{}),...(actions.length?{quickReply:{items:actions.map(action=>({type:'action',action}))}}:{})});
 const workChat=(job:ChatJob,bl:ChatBL,text:string,actions:unknown[]=[],nextStatus?:string)=>chatText(text,actions,{current:{jobNumber:job.number,blNumber:bl.number,status:bl.status,jobDate:job.job_date},...(nextStatus?{nextStatus}:{})});
 const chatButton=(label:string,data:string)=>({type:'postback',label:label.slice(0,20),data});
@@ -132,7 +133,8 @@ export async function handoverChat(env:Env,event:ChatEvent){
   const job=result.jobs[0],bl=job?.bls.find(b=>b.id===id);if(!bl)throw new ApiError('NOT_FOUND',404);
   return{job,bl};
  }
- const confirmation=postback.match(/^handover-confirm:(OPERATOR|OUTSOURCE):(\d{1,20})$/);
+  if(mode==='OPERATOR'&&(postback.startsWith('op-')||(!postback&&/^OPERATOR$/i.test(text))))return operatorBrowse(postback,(action,data={})=>rpc(env,'impjo_operator_chat',{p_actor:actorId,p_subject:subject,p_action:action,p_data:data}));
+const confirmation=postback.match(/^handover-confirm:(OPERATOR|OUTSOURCE):(\d{1,20})$/);
  if(confirmation){
   const drafts=await sb(env,`/rest/v1/impjo_events?id=eq.${confirmation[2]}&actor_id=eq.${actorId}&action=eq.CHAT_PROPOSE_HANDOVER&select=target_id,created_at,detail`) as unknown as {target_id:string;created_at:string;detail:string}[];
   const draft=drafts[0];
@@ -157,7 +159,7 @@ export async function handoverChat(env:Env,event:ChatEvent){
  if(selection){
   const {job,bl}=await readBL(selection[2]);
   await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_STATUS_INPUT_CLOSED',target_id:bl.id});
-  return workChat(job,bl,job.number+'\nB/L: '+bl.number+'\nสถานะ: '+chatStatus[bl.status]+(bl.status==='COMPLETED'?'\nงานเสร็จแล้ว สามารถเปิดกลับมาทำต่อได้':'')+'\n\nกรุณาเลือกสถานะใหม่ที่ต้องการบันทึก',[...Object.keys(chatStatus).filter(status=>status!==bl.status).map(status=>chatButton(status==='IN_PROGRESS'?'ส่งมอบ / ดำเนินการ':chatStatus[status],'handover-propose:'+mode+':'+status+':'+bl.id)),{type:'message',label:'กลับรายการ',text:mode}]);
+  return workChat(job,bl,job.number+'\nContact Name: '+(job.contact||'—')+'\nDestination: '+(bl.destination||'—')+'\nB/L: '+bl.number+'\nวัตถุประสงค์: '+(job.purpose||'—')+(job.amount!=null?'\nยอดเงิน: '+Number(job.amount).toLocaleString('th-TH')+' บาท':'')+'\nสถานะ: '+chatStatus[bl.status]+(bl.status==='COMPLETED'?'\nงานเสร็จแล้ว สามารถเปิดกลับมาทำต่อได้':'')+'\n\nกรุณาเลือกสถานะใหม่ที่ต้องการบันทึก',[...Object.keys(chatStatus).filter(status=>status!==bl.status).map(status=>chatButton(status==='IN_PROGRESS'?'ส่งมอบ / ดำเนินการ':chatStatus[status],'handover-propose:'+mode+':'+status+':'+bl.id)),{type:'message',label:'กลับรายการ',text:mode}]);
  }
  const proposal=postback.match(/^handover-propose:(OPERATOR|OUTSOURCE):(PENDING_HANDOVER|IN_PROGRESS|COMPLETED|ISSUE_REPORTED):([0-9a-f-]{36})$/);
  const statusPreset=postback.match(/^handover-preset:(OPERATOR|OUTSOURCE):(RESCHEDULE|DOCUMENT):([0-9a-f-]{36})$/);
@@ -208,7 +210,7 @@ async function webhook(request:Request,env:Env){
    if(link){
     try{await rpc(env,'impjo_claim_team_link',{p_subject:event.source?.userId,p_hash:await digest(link[1])});message=chatText('✅ ส่งคำขอผูกบัญชีแล้ว\n\nกรุณารอ ADMIN อนุมัติในหน้าเว็บ\nเมื่ออนุมัติแล้ว พิมพ์ OPERATOR เพื่อส่งมอบงาน')}
     catch(error){if(!(error instanceof ApiError))throw error;message=chatText(`ผูกบัญชีไม่สำเร็จ\n\nรหัสอาจหมดอายุ ใช้แล้ว หรือบัญชีมีการผูกอยู่\nกรุณาเข้าสู่ LINE Portal ก่อน แล้วสร้างรหัสใหม่จากบัญชีทีมงาน\n${ORIGIN}/line-link`)}
-   }else if(event.postback?.data?.startsWith('handover-')||/^(OPERATOR|OUTSOURCE)(?:\s|$)/i.test(command)){
+   }else if(event.postback?.data?.startsWith('handover-')||event.postback?.data?.startsWith('op-')||/^(OPERATOR|OUTSOURCE)(?:\s|$)/i.test(command)){
     try{message=messCard(await handoverChat(env,event),(event.postback?.data?.split(':')[1]||command.split(/\s/)[0]).toUpperCase()==='OUTSOURCE'?'OUTSOURCE':'OPERATOR')}catch(error){if(!(error instanceof ApiError))throw error;message=chatText('ไม่สามารถปรับปรุงสถานะงานได้\n\nสถานะงานหรือสิทธิ์การใช้งานอาจมีการเปลี่ยนแปลง\nพิมพ์ OPERATOR หรือ OUTSOURCE เพื่อดูข้อมูลล่าสุด')}
    }else if(event.postback?.data?.startsWith('mess-')||(event.type==='message'&&event.message?.type==='text')){
     try{message=messCard(await messChat(env,event))}catch(error){if(!(error instanceof ApiError))throw error;message=chatText(['ACCESS_DENIED','APPROVAL_REQUIRED','NOT_FOUND'].includes(error.message)?'ไม่พบ B/L หรือไม่มีสิทธิ์ดำเนินการ กรุณาตรวจสอบข้อมูลกับผู้ดูแลระบบ':error.message==='INVALID_STATUS_TRANSITION'?'สถานะงานหรือสิทธิ์เปลี่ยนไปแล้ว กรุณาพิมพ์ MESS เพื่อดูข้อมูลล่าสุด':'ทำรายการไม่สำเร็จ กรุณาพิมพ์ MESS แล้วลองใหม่')}
@@ -334,5 +336,4 @@ export async function onRequest({request,env}:Ctx){try{
  if(path==='me'&&request.method==='GET')return json(await rpc(env,'impjo_api',{p_actor:await actor(request,env),p_action:'me',p_data:{}}));
  return json({error:'NOT_FOUND'},404);
 }catch(error){if(error instanceof ApiError)return json({error:error.message},error.status);return json({error:'SERVICE_UNAVAILABLE'},503)}}
-
 

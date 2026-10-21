@@ -1,0 +1,7 @@
+# LINE OPERATOR grouped work and batch updates
+
+OPERATOR opens a paginated Contact Name selector. Each Contact shows B/L cards with Destination, purpose and amount, plus a purpose summary counted once per Job (not once per B/L). Single-B/L status changes remain available. Select multiple B/Ls within one Contact, including across pages, up to 20 per batch. Choose any existing status, choose a mandatory predefined issue reason when reporting an issue, inspect the exact B/Ls and old/new states, then confirm within 10 minutes. No business statuses change while selecting or proposing.
+
+The service-only impjo_operator_chat RPC binds every operation to the current approved OPERATOR and actual LINE mapping. Drafts use existing audit events, scoped to the actor and LINE subject. Confirmations acquire a single draft lock, stable Job and B/L locks, recheck every expected state and permission and call the existing status API inside one transaction. Any stale/deleted/inaccessible B/L aborts the whole batch. Successful batches record a replay marker and the existing per-B/L audit history. Anonymous/authenticated SQL execution is revoked. MESS/OUTSOURCE roles are unchanged. No new tables, RLS changes, secrets or Push messages.
+
+Verified: TypeScript, production build, 76 Node tests and a rolled-back live SQL integration test for job-counted totals, batch writes/audit, stale atomic rejection, replay, wrong LINE, disabled and MESS denial. Physical LINE rendering still requires device confirmation. Supabase Edge impjo-api v26 deployed ACTIVE.
