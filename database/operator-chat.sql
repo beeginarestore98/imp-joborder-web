@@ -7,8 +7,8 @@ begin
  page:=greatest(1,least(coalesce((p_data->>'page')::int,1),100000));key:=coalesce(p_data->>'key','');
  if p_action='contacts' then
   with contacts as(select md5(lower(btrim(j.contact))) as key,min(j.contact) as contact,count(*) as bl_count from public.impjo_jobs j join public.impjo_bls b on b.job_id=j.id where j.archived_at is null and public.impjo_visible_bl(p_actor,b.id) group by lower(btrim(j.contact))),
-  paged as(select * from contacts order by lower(contact),key limit 10 offset((page-1)*10))
-  select jsonb_build_object('total',(select count(*) from contacts),'contacts',coalesce((select jsonb_agg(to_jsonb(p) order by lower(contact),key) from paged p),'[]'),'page',page) into result;
+  paged as(select c.* from contacts c order by lower(c.contact),c.key limit 10 offset((page-1)*10))
+  select jsonb_build_object('total',(select count(*) from contacts),'contacts',coalesce((select jsonb_agg(to_jsonb(p) order by lower(p.contact),p.key) from paged p),'[]'),'page',page) into result;
   return result;
  end if;
  if p_action in ('toggle','page','propose','confirm') then

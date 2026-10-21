@@ -9,6 +9,8 @@ begin
  insert into public.impjo_jobs(contact,phone,purpose,amount,created_by,job_date) values('QA OP BATCH','000','ตามใบเสร็จ',100,a,current_date) returning id into j;
  insert into public.impjo_bls(job_id,number,consignee,destination) values(j,'QA-OP-BATCH-A','QA','QA Shipping') returning id into b;
  insert into public.impjo_bls(job_id,number,consignee,destination) values(j,'QA-OP-BATCH-B','QA','QA Shipping') returning id into c;
+ r:=public.impjo_operator_chat(a,subject,'contacts');
+ assert (r->>'total')::int>0,'Contact menu failed';
  r:=public.impjo_operator_chat(a,subject,'bls',jsonb_build_object('key',key));
  assert (r->>'total')::int=2,'Missing B/L';assert r->'bls'->0->>'destination'='QA Shipping','Missing destination';
  assert (r->'purpose_summary'->0->>'jobs')::int=1,'Purpose counts duplicated Jobs';assert (r->'purpose_summary'->0->>'amount')::numeric=100,'Money counted per BL';

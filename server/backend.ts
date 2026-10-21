@@ -1,4 +1,4 @@
-import{operatorBrowse}from'./operator-chat.ts';
+import{operatorBrowse,operatorErrorMessage}from'./operator-chat.ts';
 import{messCard,type CardPresentation}from'./mess-card.ts';
 type Env={SUPABASE_URL:string;SUPABASE_SERVICE_ROLE_KEY:string;SUPABASE_PUBLISHABLE_KEY:string;LINE_LOGIN_CHANNEL_ID:string;LINE_LOGIN_CHANNEL_SECRET:string;LIFF_ID:string;LINE_MESSAGING_CHANNEL_SECRET:string;LINE_MESSAGING_CHANNEL_ACCESS_TOKEN:string};
 type Ctx={request:Request;env:Env;params:Record<string,string|string[]>};
@@ -211,7 +211,7 @@ async function webhook(request:Request,env:Env){
     try{await rpc(env,'impjo_claim_team_link',{p_subject:event.source?.userId,p_hash:await digest(link[1])});message=chatText('✅ ส่งคำขอผูกบัญชีแล้ว\n\nกรุณารอ ADMIN อนุมัติในหน้าเว็บ\nเมื่ออนุมัติแล้ว พิมพ์ OPERATOR เพื่อส่งมอบงาน')}
     catch(error){if(!(error instanceof ApiError))throw error;message=chatText(`ผูกบัญชีไม่สำเร็จ\n\nรหัสอาจหมดอายุ ใช้แล้ว หรือบัญชีมีการผูกอยู่\nกรุณาเข้าสู่ LINE Portal ก่อน แล้วสร้างรหัสใหม่จากบัญชีทีมงาน\n${ORIGIN}/line-link`)}
    }else if(event.postback?.data?.startsWith('handover-')||event.postback?.data?.startsWith('op-')||/^(OPERATOR|OUTSOURCE)(?:\s|$)/i.test(command)){
-    try{message=messCard(await handoverChat(env,event),(event.postback?.data?.split(':')[1]||command.split(/\s/)[0]).toUpperCase()==='OUTSOURCE'?'OUTSOURCE':'OPERATOR')}catch(error){if(!(error instanceof ApiError))throw error;message=chatText('ไม่สามารถปรับปรุงสถานะงานได้\n\nสถานะงานหรือสิทธิ์การใช้งานอาจมีการเปลี่ยนแปลง\nพิมพ์ OPERATOR หรือ OUTSOURCE เพื่อดูข้อมูลล่าสุด')}
+    try{message=messCard(await handoverChat(env,event),(event.postback?.data?.split(':')[1]||command.split(/\s/)[0]).toUpperCase()==='OUTSOURCE'?'OUTSOURCE':'OPERATOR')}catch(error){if(!(error instanceof ApiError))throw error;message=chatText(operatorErrorMessage(error.message))}
    }else if(event.postback?.data?.startsWith('mess-')||(event.type==='message'&&event.message?.type==='text')){
     try{message=messCard(await messChat(env,event))}catch(error){if(!(error instanceof ApiError))throw error;message=chatText(['ACCESS_DENIED','APPROVAL_REQUIRED','NOT_FOUND'].includes(error.message)?'ไม่พบ B/L หรือไม่มีสิทธิ์ดำเนินการ กรุณาตรวจสอบข้อมูลกับผู้ดูแลระบบ':error.message==='INVALID_STATUS_TRANSITION'?'สถานะงานหรือสิทธิ์เปลี่ยนไปแล้ว กรุณาพิมพ์ MESS เพื่อดูข้อมูลล่าสุด':'ทำรายการไม่สำเร็จ กรุณาพิมพ์ MESS แล้วลองใหม่')}
    }

@@ -3,6 +3,10 @@ type Result={total:number;page:number;key:string;contact:string;draft:string|num
 const statusLabels:Record<string,string>={PENDING_HANDOVER:'รอส่งมอบ',IN_PROGRESS:'กำลังดำเนินการ',COMPLETED:'เสร็จสมบูรณ์',ISSUE_REPORTED:'แจ้งปัญหา'};
 const button=(label:string,data:string):CardAction=>({type:'postback',label:label.slice(0,20),data});
 const back:CardAction={type:'message',label:'เลือกผู้ประสานงาน',text:'OPERATOR'};
+export function operatorErrorMessage(code:string){
+ const reasons:Record<string,string>={ACCESS_DENIED:'บัญชีนี้ไม่มีสิทธิ์ดำเนินการ กรุณาให้ ADMIN ตรวจสอบบทบาทและการผูก LINE',APPROVAL_REQUIRED:'บัญชียังไม่ได้เปิดใช้งาน หรือถูกระงับ กรุณาติดต่อ ADMIN',CHAT_EXPIRED:'คำขอหมดอายุหรือบันทึกไปแล้ว กรุณาเลือกรายการใหม่',BATCH_LIMIT:'เลือกได้ไม่เกิน 20 B/L ต่อชุด กรุณาบันทึกชุดนี้ก่อน',INVALID_BATCH:'ยังไม่ได้เลือกรายการ หรือชุดข้อมูลไม่ถูกต้อง กรุณาเลือก B/L ใหม่',STALE_STATUS:'สถานะงานเปลี่ยนระหว่างดำเนินการ ระบบไม่ได้บันทึกทับ กรุณาโหลดรายการล่าสุด',NOT_FOUND:'ไม่พบรายการงาน งานอาจถูกลบหรือไม่มีสิทธิ์เข้าถึง',ISSUE_DETAIL_REQUIRED:'กรุณาเลือกประเภทปัญหาก่อนยืนยันบันทึก'};
+ return (reasons[code]||'ระบบประมวลผลรายการงานขัดข้อง กรุณาลองใหม่ หากยังพบปัญหาให้แจ้ง ADMIN')+'\n\nพิมพ์ OPERATOR หรือ OUTSOURCE เพื่อเปิดรายการล่าสุด';
+}
 const chat=(text:string,actions:CardAction[],presentation?:CardPresentation)=>({type:'text',text,quickReply:{items:actions.map(action=>({action}))},...(presentation?{presentation}:{})});
 export async function operatorBrowse(postback:string,call:(action:string,data?:unknown)=>Promise<unknown>){
  const invoke=async(action:string,data:unknown={})=>await call(action,data) as Result;
