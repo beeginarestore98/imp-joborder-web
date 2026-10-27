@@ -1,4 +1,3 @@
-import BLDropdowns from './BLDropdowns';
 import {splitPurposes,joinPurposes,purposeRequiresAmount} from '../shared/purposes';
 import {validContactPhone} from '../shared/contact-phone';
 import{useEffect,useRef,useState}from'react';
@@ -21,4 +20,3 @@ export function ContactPurposeFields({call,initial}:{call:Call;initial?:{contact
  <div className="full"><button type="button" className="text-button" onClick={()=>setMode(mode==='manage-purpose'?'':'manage-purpose')}>จัดการ / ลบตัวเลือกวัตถุประสงค์</button>{mode==='manage-purpose'&&<div className="bl-card"><p>นำตัวเลือกออกจากรายการสำหรับงานใหม่ โดยไม่เปลี่ยนข้อความในงานที่บันทึกแล้ว</p>{purposes.data.filter(p=>!p.archived_at).map(p=><div className="flex-between" key={p.id}><span>{p.name}</span><button type="button" className="text-button" disabled={busy} onClick={async()=>{if(!window.confirm('นำวัตถุประสงค์ '+p.name+' ออกจากรายการตัวเลือกหรือไม่?'))return;setBusy(true);setError('');try{await call('catalog_archive',{id:p.id});setSelected(values=>values.filter(x=>x!==p.name));setRevision(n=>n+1);setNotice('นำตัวเลือก '+p.name+' ออกแล้ว')}catch(e){setError((e as Error).message)}finally{setBusy(false)}}}>ลบตัวเลือก</button></div>)}</div>}</div>
  {(contacts.loading||purposes.loading)&&<p className="full footnote" role="status">กำลังโหลดรายการ...</p>}{(error||contacts.error||purposes.error)&&<p className="full error" role="alert">{error||contacts.error||purposes.error}</p>}{notice&&<p className="full notice" role="status">{notice}</p>}</>
 }
-export function ShippingChoices({call}:{call:Call}){return <BLDropdowns call={call}/>;}
