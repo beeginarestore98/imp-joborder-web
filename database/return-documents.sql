@@ -1,4 +1,4 @@
--- Proposed: private return-document storage and per-Contact Microsoft recipients.
+-- Proposed: private return-document storage and per-Contact email recipients.
 create table public.impjo_document_recipients(contact_key text primary key,contact_name text not null,email text not null,enabled boolean not null default false,updated_at timestamptz not null default now(),updated_by uuid not null);
 create table public.impjo_return_documents(id uuid primary key,job_id uuid not null references public.impjo_jobs(id) on delete cascade,bl_id uuid not null references public.impjo_bls(id) on delete cascade,created_by uuid not null,object_path text not null unique,sha256 text not null check(sha256~'^[0-9a-f]{64}$'),pages int not null check(pages between 1 and 10),bytes int not null check(bytes between 1 and 5300000),state text not null default 'UPLOADING' check(state in('UPLOADING','READY','SUBMITTED')),recipient_version timestamptz,email text,created_at timestamptz not null default now());
 create table public.impjo_document_deliveries(document_id uuid not null references public.impjo_return_documents(id) on delete cascade,channel text not null check(channel='email'),state text not null default 'PENDING' check(state in('PENDING','SENDING','ACCEPTED','DELIVERED','FAILED','UNKNOWN')),lease uuid,provider_id text,error text not null default '',updated_at timestamptz not null default now(),primary key(document_id,channel));
@@ -11,15 +11,24 @@ begin
  select * into person from public.impjo_principals where id=p_actor for share;
  if not found or person.state<>'APPROVED' or person.archived_at is not null then raise exception 'ACCESS_DENIED' using errcode='42501';end if;
  select exists(select 1 from public.impjo_roles where principal_id=p_actor and role='ADMIN') and person.kind='STAFF',exists(select 1 from public.impjo_roles where principal_id=p_actor and role='MESS') and person.kind='LINE' into admin,mess;
- if p_action in('recipients','recipient_save') then
+ if p_action in('recipients','recipient_save','recipient_delete') then
   if not admin then raise exception 'ACCESS_DENIED' using errcode='42501';end if;
+  if p_action='recipient_delete' then
+   if p_data->>'confirmed' is distinct from 'true' then raise exception 'DOCUMENT_CONFIRM_REQUIRED' using errcode='22023';end if;
+   key:=lower(btrim(p_data->>'contact_name'));
+   select * into recipient from public.impjo_document_recipients where contact_key=key for update;
+   if not found then raise exception 'NOT_FOUND' using errcode='P0002';end if;
+   if recipient.updated_at is distinct from (p_data->>'version')::timestamptz then raise exception 'DOCUMENT_RECIPIENT_CHANGED' using errcode='22023';end if;
+   delete from public.impjo_document_recipients where contact_key=key;
+   insert into public.impjo_events(actor_id,action,detail) values(p_actor,'DOCUMENT_RECIPIENT_DELETED',jsonb_build_object('contact',key)::text);
+  end if;
   if p_action='recipient_save' then
    key:=lower(btrim(p_data->>'contact_name'));
-   if coalesce(length(key),0) not between 1 and 120 or coalesce(p_data->>'email','') !~ '^[A-Za-z0-9.!#$%&''*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$' or length(p_data->>'email')>254 then raise exception 'INVALID_RECIPIENT' using errcode='22023';end if;
+   if coalesce(length(key),0) not between 1 and 120 or coalesce(p_data->>'email','') !~ '^[A-Za-z0-9.!#$%&''*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}$' or length(p_data->>'email')>254 then raise exception 'INVALID_RECIPIENT' using errcode='22023';end if;
    insert into public.impjo_document_recipients(contact_key,contact_name,email,enabled,updated_by) values(key,btrim(p_data->>'contact_name'),lower(btrim(p_data->>'email')),coalesce((p_data->>'enabled')::boolean,false),p_actor) on conflict(contact_key) do update set contact_name=excluded.contact_name,email=excluded.email,enabled=excluded.enabled,updated_by=p_actor,updated_at=clock_timestamp();
    insert into public.impjo_events(actor_id,action,detail) values(p_actor,'DOCUMENT_RECIPIENT_UPDATED',jsonb_build_object('contact',key,'enabled',p_data->'enabled')::text);
   end if;
-  return jsonb_build_object('contacts',(select coalesce(jsonb_agg(c.contact order by c.contact),'[]') from(select distinct contact from public.impjo_jobs where archived_at is null)c),'recipients',coalesce((select jsonb_agg(to_jsonb(r) order by r.contact_name) from public.impjo_document_recipients r),'[]'));
+  return jsonb_build_object('contacts',(select coalesce(jsonb_agg(c.contact order by c.contact),'[]') from(select distinct contact from public.impjo_jobs where archived_at is null union select name from public.impjo_catalog where kind='CONTACT' and archived_at is null union select contact_name from public.impjo_document_recipients)c),'recipients',coalesce((select jsonb_agg(to_jsonb(r) order by r.contact_name) from public.impjo_document_recipients r),'[]'));
  end if;
  if p_action='context' then
   select * into b from public.impjo_bls where id=(p_data->>'bl_id')::uuid;
@@ -80,3 +89,4 @@ begin
 end $$;
 revoke all on function public.impjo_documents(uuid,text,jsonb) from public,anon,authenticated;
 grant execute on function public.impjo_documents(uuid,text,jsonb) to service_role;
+

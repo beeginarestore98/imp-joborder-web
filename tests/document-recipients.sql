@@ -1,0 +1,20 @@
+set local role service_role;
+do $$ declare a uuid;m uuid;r jsonb;v text;denied boolean;begin
+insert into public.impjo_principals(kind,state,name) values('STAFF','APPROVED','QA RECIPIENT ADMIN') returning id into a;
+insert into public.impjo_roles values(a,'ADMIN');
+insert into public.impjo_principals(kind,state,name) values('LINE','APPROVED','QA RECIPIENT MESS') returning id into m;
+insert into public.impjo_roles values(m,'MESS');
+perform public.impjo_documents(a,'recipient_save','{"contact_name":"QA RECIPIENT NEW","email":"qa@example.invalid","enabled":true}');
+r:=public.impjo_documents(a,'recipients','{}');
+assert (r->'contacts') ? 'QA RECIPIENT NEW','New contact missing';
+select updated_at::text into v from public.impjo_document_recipients where contact_key='qa recipient new';
+denied:=false;begin perform public.impjo_documents(m,'recipient_delete',jsonb_build_object('contact_name','QA RECIPIENT NEW','version',v,'confirmed',true));exception when insufficient_privilege then denied:=true;end;assert denied,'MESS deleted mapping';
+denied:=false;begin perform public.impjo_documents(a,'recipient_delete',jsonb_build_object('contact_name','QA RECIPIENT NEW','version',v));exception when sqlstate '22023' then denied:=true;end;assert denied,'No confirmation deleted mapping';
+perform public.impjo_documents(a,'recipient_save','{"contact_name":"QA RECIPIENT NEW","email":"qa2@example.invalid","enabled":true}');
+denied:=false;begin perform public.impjo_documents(a,'recipient_delete',jsonb_build_object('contact_name','QA RECIPIENT NEW','version',v,'confirmed',true));exception when sqlstate '22023' then denied:=true;end;assert denied,'Stale mapping deleted';
+select updated_at::text into v from public.impjo_document_recipients where contact_key='qa recipient new';
+perform public.impjo_documents(a,'recipient_delete',jsonb_build_object('contact_name','QA RECIPIENT NEW','version',v,'confirmed',true));
+assert not exists(select 1 from public.impjo_document_recipients where contact_key='qa recipient new'),'Mapping retained';
+perform public.impjo_documents(a,'recipient_save','{"contact_name":"QA RECIPIENT NEW","email":"qa@example.invalid","enabled":true}');
+assert exists(select 1 from public.impjo_document_recipients where contact_key='qa recipient new'),'Recreate failed';
+end $$;

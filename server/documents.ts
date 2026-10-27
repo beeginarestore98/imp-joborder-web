@@ -21,6 +21,7 @@ export async function documentRequest(request:Request,path:string,env:DocumentEn
   if(request.method!=='POST')return response({error:'NOT_FOUND'},404);
   const data=await documentBody(request);
   if(path==='documents/recipients')return response(await call('recipient_save',data));
+  if(path==='documents/recipients/delete')return response(await call('recipient_delete',data));
   if(path==='documents/upload'){
    if(!/^[0-9a-f-]{36}$/.test(data.id||'')||!Array.isArray(data.pages)||data.pages.length<1||data.pages.length>MAX_DOCUMENT_PAGES)throw Error('INVALID_DOCUMENT');
    const pages:Uint8Array[]=data.pages.map((p:unknown)=>{if(typeof p!=='string'||p.length>MAX_DOCUMENT_BYTES*1.4||!/^[A-Za-z0-9+/]+={0,2}$/.test(p))throw Error('INVALID_DOCUMENT_IMAGE');return Uint8Array.from(atob(p),c=>c.charCodeAt(0))});
