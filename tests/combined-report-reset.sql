@@ -1,0 +1,27 @@
+set local role service_role;
+do $$declare a uuid;m uuid;x uuid;j uuid;b uuid;d uuid:=gen_random_uuid();n uuid;r jsonb;lease uuid;denied boolean;contact text:='QA COMBINED '||gen_random_uuid();begin
+insert into public.impjo_principals(kind,state,name) values('STAFF','APPROVED','QA RESET OP') returning id into a;insert into public.impjo_roles values(a,'OPERATOR'),(a,'ADMIN');
+insert into public.impjo_principals(kind,state,name) values('LINE','APPROVED','QA COMBINED MESS') returning id into m;insert into public.impjo_roles values(m,'MESS');
+insert into public.impjo_principals(kind,state,name) values('LINE','APPROVED','QA OUTSOURCE') returning id into x;insert into public.impjo_roles values(x,'OUTSOURCE');
+perform public.impjo_documents(a,'recipient_save',jsonb_build_object('contact_name',contact,'email','qa@example.invalid','enabled',true));
+insert into public.impjo_jobs(contact,phone,purpose,created_by,job_date) values(contact,'0811111111','QA',a,current_date) returning id into j;
+insert into public.impjo_bls(job_id,number,consignee,destination,status) values(j,'QA-COMBINED','QA','QA','IN_PROGRESS') returning id into b;
+perform public.impjo_documents(m,'reserve',jsonb_build_object('id',d,'bl_id',b,'sha256',repeat('a',64),'pages',2,'bytes',100));perform public.impjo_documents(m,'complete',jsonb_build_object('id',d));
+r:=public.impjo_api(m,'status',jsonb_build_object('bl_id',b,'status','ISSUE_REPORTED','detail','แก้ไขเอกสาร','document_id',d,'expected_status','IN_PROGRESS'));n:=(r->>'notification_id')::uuid;
+assert (select status='COMPLETED' and report_outcome='ISSUE_REPORTED' and report_detail='แก้ไขเอกสาร' from public.impjo_bls where id=b),'Issue not closed separately';
+assert (select document_id=d and payload->>'status'='ISSUE_REPORTED' from public.impjo_status_notifications where id=n),'PDF not atomically linked';
+assert (public.impjo_documents(m,'claim',jsonb_build_object('id',d,'channel','email'))->>'skip')::boolean,'Combined PDF sent separately';
+r:=public.impjo_status_mail(m,'claim',jsonb_build_object('id',n));lease:=(r->>'lease')::uuid;assert r->>'document_path'=j::text||'/'||d::text||'.pdf','Wrong attachment path';
+denied:=false;begin perform public.impjo_reset_report(a,'prepare',jsonb_build_object('bl_id',b,'confirmed',true,'expected_status','COMPLETED'));exception when invalid_parameter_value then denied:=true;end;assert denied,'Reset raced sending email';
+perform public.impjo_status_mail(m,'finish',jsonb_build_object('id',n,'lease',lease,'state','ACCEPTED','provider_id','QA'));
+assert (select state='ACCEPTED' from public.impjo_document_deliveries where document_id=d),'PDF result not synchronized';
+denied:=false;begin perform public.impjo_reset_report(x,'prepare',jsonb_build_object('bl_id',b,'confirmed',true,'expected_status','COMPLETED'));exception when insufficient_privilege then denied:=true;end;assert denied,'OUTSOURCE purged files';
+r:=public.impjo_reset_report(a,'prepare',jsonb_build_object('bl_id',b,'confirmed',true,'expected_status','COMPLETED'));
+assert jsonb_array_length(r->'paths')=1,'Cleanup path lost';assert not exists(select 1 from public.impjo_return_documents where bl_id=b),'Document metadata retained';assert not exists(select 1 from public.impjo_status_notifications where bl_id=b),'Report retained';assert (select status='PENDING_HANDOVER' and report_outcome is null and report_detail='' from public.impjo_bls where id=b),'Work not cleared';
+assert public.impjo_reset_report(a,'prepare',jsonb_build_object('bl_id',b,'confirmed',true,'expected_status','COMPLETED'))->>'cleanup_id'=r->>'cleanup_id','Cleanup retry not stable';
+denied:=false;begin perform public.impjo_api(a,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));exception when invalid_parameter_value then denied:=true;end;assert denied,'New report raced cleanup';
+perform public.impjo_reset_report(a,'finish',jsonb_build_object('bl_id',b,'cleanup_id',r->>'cleanup_id'));
+assert exists(select 1 from public.impjo_events where target_id=b and actor_id=a and action='WORK_RESET'),'Reset actor not audited';assert not exists(select 1 from public.impjo_events where target_id=b and detail like '%แก้ไขเอกสาร%'),'Old issue retained';
+perform public.impjo_api(a,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));assert (select status='IN_PROGRESS' from public.impjo_bls where id=b),'New handover blocked';
+assert not has_function_privilege('authenticated','public.impjo_reset_report(uuid,text,jsonb)','EXECUTE'),'Reset RPC exposed';
+end $$;

@@ -1,10 +1,12 @@
 import {gmailConfigured,type DocumentMail} from './gmail-mailer.ts';
-type Env={DOCUMENT_FROM_EMAIL?:string;GMAIL_APP_PASSWORD?:string;sendDocumentMail?:(mail:DocumentMail)=>Promise<{state:'ACCEPTED';providerId:string}>};
+import {storedFile,base64,type DocumentEnv} from './documents.ts';
+type Env=DocumentEnv;
 export async function deliverStatusEmail(env:Env,id:string,call:(action:string,data:unknown)=>Promise<any>){
  if(!gmailConfigured(env)||!env.sendDocumentMail)return {state:'NOT_CONFIGURED'};
  const claim=await call('claim',{id});if(claim.skip)return {state:claim.state};
  let state='UNKNOWN',provider_id='',error='DELIVERY_UNCONFIRMED';
- try{const result=await env.sendDocumentMail(claim as DocumentMail);state=result.state;provider_id=result.providerId;error=''}catch(e){if((e as Error).message==='EMAIL_PROVIDER_REJECTED'){state='FAILED';error='EMAIL_PROVIDER_REJECTED'}}
+ let attachmentReady=true;if(claim.document_path){try{claim.pdfBase64=base64(await storedFile(env,claim.document_path))}catch{attachmentReady=false;state='FAILED';error='DOCUMENT_STORAGE_FAILED'}}
+ try{if(!attachmentReady)throw Error('DOCUMENT_STORAGE_FAILED');const result=await env.sendDocumentMail(claim as DocumentMail);state=result.state;provider_id=result.providerId;error=''}catch(e){if((e as Error).message==='EMAIL_PROVIDER_REJECTED'){state='FAILED';error='EMAIL_PROVIDER_REJECTED'}}
  try{await call('finish',{id,lease:claim.lease,state,provider_id,error})}catch{return {state:'UNKNOWN'}}
  return {state};
 }

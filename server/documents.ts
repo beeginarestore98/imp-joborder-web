@@ -7,8 +7,8 @@ const response=(data:unknown,status=200)=>Response.json(data,{status,headers:{'C
 function storageHeaders(env:DocumentEnv){const headers:Record<string,string>={apikey:env.SUPABASE_SERVICE_ROLE_KEY,Authorization:'Bearer '+env.SUPABASE_SERVICE_ROLE_KEY};return headers}
 export function emailConfigured(env:DocumentEnv){return gmailConfigured(env)&&typeof env.sendDocumentMail==='function'}
 export async function documentBody(request:Request){if(!request.headers.get('content-type')?.startsWith('application/json'))throw Error('JSON_REQUIRED');const reader=request.body?.getReader();if(!reader)throw Error('INVALID_DOCUMENT');const chunks:Uint8Array[]=[];let size=0;while(true){const{value,done}=await reader.read();if(done)break;size+=value.length;if(size>8*1024*1024){await reader.cancel();throw Error('DOCUMENT_LIMIT')}chunks.push(value)}const data=new Uint8Array(size);let offset=0;for(const c of chunks){data.set(c,offset);offset+=c.length}try{return JSON.parse(new TextDecoder().decode(data))}catch{throw Error('INVALID_DOCUMENT')}}
-function base64(data:Uint8Array){let s='';for(let i=0;i<data.length;i+=16384)s+=String.fromCharCode(...data.subarray(i,i+16384));return btoa(s)}
-async function storedFile(env:DocumentEnv,path:string){const r=await fetch(env.SUPABASE_URL+'/storage/v1/object/authenticated/'+BUCKET+'/'+path,{headers:storageHeaders(env),signal:AbortSignal.timeout(12000)});if(!r.ok)throw Error('DOCUMENT_STORAGE_FAILED');return new Uint8Array(await r.arrayBuffer())}
+export function base64(data:Uint8Array){let s='';for(let i=0;i<data.length;i+=16384)s+=String.fromCharCode(...data.subarray(i,i+16384));return btoa(s)}
+export async function storedFile(env:DocumentEnv,path:string){const r=await fetch(env.SUPABASE_URL+'/storage/v1/object/authenticated/'+BUCKET+'/'+path,{headers:storageHeaders(env),signal:AbortSignal.timeout(12000)});if(!r.ok)throw Error('DOCUMENT_STORAGE_FAILED');return new Uint8Array(await r.arrayBuffer())}
 export async function documentRequest(request:Request,path:string,env:DocumentEnv,call:RPC){
  const ready=emailConfigured(env),url=new URL(request.url);
  try{
@@ -69,4 +69,9 @@ export async function cleanupDocumentFiles(env:DocumentEnv,jobId:string){
   const prefixes=files.filter(f=>f.id&&/^[0-9a-f-]{36}\.pdf$/.test(f.name)).map(f=>jobId+'/'+f.name);if(prefixes.length!==files.length)throw Error('DOCUMENT_STORAGE_FAILED');
   const removed=await fetch(env.SUPABASE_URL+'/storage/v1/object/'+BUCKET,{method:'DELETE',headers:{...storageHeaders(env),'Content-Type':'application/json'},body:JSON.stringify({prefixes}),signal:AbortSignal.timeout(10000)});if(!removed.ok)throw Error('DOCUMENT_STORAGE_FAILED');
  }throw Error('DOCUMENT_STORAGE_FAILED');
+}
+
+export async function deleteReportFiles(env:DocumentEnv,paths:unknown){
+ if(!Array.isArray(paths)||paths.some(p=>typeof p!=='string'||!/^[0-9a-f-]{36}\/[0-9a-f-]{36}\.pdf$/.test(p)))throw Error('DOCUMENT_STORAGE_FAILED');
+ for(let i=0;i<paths.length;i+=100){const r=await fetch(env.SUPABASE_URL+'/storage/v1/object/'+BUCKET,{method:'DELETE',headers:{...storageHeaders(env),'Content-Type':'application/json'},body:JSON.stringify({prefixes:paths.slice(i,i+100)}),signal:AbortSignal.timeout(12000)});if(!r.ok)throw Error('DOCUMENT_STORAGE_FAILED')}
 }

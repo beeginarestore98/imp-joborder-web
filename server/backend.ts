@@ -1,5 +1,5 @@
 import {deliverStatusEmail,statusEmailText} from './status-email.ts';
-import{documentRequest,cleanupDocumentFiles,emailConfigured}from'./documents.ts';
+import{documentRequest,cleanupDocumentFiles,deleteReportFiles,emailConfigured}from'./documents.ts';
 import{operatorBrowse,operatorErrorMessage}from'./operator-chat.ts';
 import{messCard,type CardPresentation}from'./mess-card.ts';
 type Env={GMAIL_APP_PASSWORD?:string;DOCUMENT_FROM_EMAIL?:string;sendDocumentMail?:import("./documents.ts").DocumentEnv["sendDocumentMail"];SUPABASE_URL:string;SUPABASE_SERVICE_ROLE_KEY:string;SUPABASE_PUBLISHABLE_KEY:string;LINE_LOGIN_CHANNEL_ID:string;LINE_LOGIN_CHANNEL_SECRET:string;LIFF_ID:string;LINE_MESSAGING_CHANNEL_SECRET:string;LINE_MESSAGING_CHANNEL_ACCESS_TOKEN:string};
@@ -17,7 +17,7 @@ async function sb(env:Env,path:string,body?:unknown,auth?:string,method?:string)
  else if(key?.startsWith('eyJ'))headers.Authorization=`Bearer ${key}`;
  const response=await fetch(`${env.SUPABASE_URL}${path}`,{method:method||(body===undefined?'GET':'POST'),headers,body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
  const raw=await response.text();const data=(raw?JSON.parse(raw):{}) as Record<string,unknown>;
- if(!response.ok){const code=String(data.code||'');const known=['INVALID_SEARCH_FILTER','ACCOUNT_DELETED','ACCOUNT_DELETE_PENDING','INVITE_UNAVAILABLE','INVALID_INVITE','INVITE_WRONG_ACCOUNT','INVITE_ACCOUNT_HAS_ROLE','INVALID_EMAIL_CODE','AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG','INVALID_JOB_DATE','AMOUNT_REQUIRED','INVALID_AMOUNT','INVALID_CATALOG','STALE_JOB','STALE_STATUS','JOB_ARCHIVED','BL_REMOVAL_NOT_ALLOWED','INVALID_DATE_RANGE','EXPORT_TOO_LARGE','DOCUMENT_NOT_READY','DOCUMENT_RECIPIENT_REQUIRED','DOCUMENT_RECIPIENT_CHANGED','DOCUMENT_CONFLICT','INVALID_DELIVERY_STATE','INVALID_RECIPIENT','CHAT_EXPIRED','BATCH_LIMIT','INVALID_BATCH'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')||code==='28000'?401:code==='42501'?403:code==='P0002'?404:400)}
+ if(!response.ok){const code=String(data.code||'');const known=['REPORT_RESET_BUSY','INVALID_SEARCH_FILTER','ACCOUNT_DELETED','ACCOUNT_DELETE_PENDING','INVITE_UNAVAILABLE','INVALID_INVITE','INVITE_WRONG_ACCOUNT','INVITE_ACCOUNT_HAS_ROLE','INVALID_EMAIL_CODE','AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG','INVALID_JOB_DATE','AMOUNT_REQUIRED','INVALID_AMOUNT','INVALID_CATALOG','STALE_JOB','STALE_STATUS','JOB_ARCHIVED','BL_REMOVAL_NOT_ALLOWED','INVALID_DATE_RANGE','EXPORT_TOO_LARGE','DOCUMENT_NOT_READY','DOCUMENT_RECIPIENT_REQUIRED','DOCUMENT_RECIPIENT_CHANGED','DOCUMENT_CONFLICT','INVALID_DELIVERY_STATE','INVALID_RECIPIENT','CHAT_EXPIRED','BATCH_LIMIT','INVALID_BATCH'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')||code==='28000'?401:code==='42501'?403:code==='P0002'?404:400)}
  return data;
 }
 async function rpc(env:Env,name:string,data:unknown){const result=await sb(env,`/rest/v1/rpc/${name}`,data);const args=data as {p_action?:string;p_actor?:string};if(name==='impjo_api'&&args.p_action==='status'&&typeof result.notification_id==='string'){try{result.email_notification=await deliverStatusEmail(env,result.notification_id,(action,p_data)=>sb(env,'/rest/v1/rpc/impjo_status_mail',{p_actor:args.p_actor,p_action:action,p_data}))}catch{result.email_notification={state:'ERROR'}}}return result;}
@@ -74,7 +74,7 @@ export async function messChat(env:Env,event:ChatEvent){
   if(bl.status!=='IN_PROGRESS')return chatText(`B/L ${bl.number} มีสถานะ ${chatStatus[bl.status]} แล้ว ไม่มีการบันทึกซ้ำ\nพิมพ์ MESS เพื่อดูงานล่าสุด`);
   const status=draft.action.slice('CHAT_PROPOSE_'.length);
   const saved=await call('status',{bl_id:bl.id,status,detail:draft.detail});
-  return workChat(job,{...bl,status},`บันทึกสำเร็จ\n\nงาน: ${job.number}\nB/L: ${bl.number}\nสถานะ: ${chatStatus[status]}${draft.detail?'\nรายละเอียด: '+draft.detail:''}\n\nข้อมูลได้รับการบันทึกและแสดงผลบนเว็บไซต์แล้ว${statusEmailText(saved.email_notification as {state?:string}|undefined)}`, [{type:'message',label:'เลือกผู้ประสานงาน',text:'MESS'},{type:'uri',label:'สแกนเอกสารส่งกลับ',uri:ORIGIN+'/api/line/start?next='+encodeURIComponent('/jobs/'+job.id+'?documents='+bl.id)}]);
+  return workChat(job,{...bl,status:(saved.status||status) as ChatBL['status']},`บันทึกสำเร็จ\n\nงาน: ${job.number}\nB/L: ${bl.number}\nสถานะ: ${chatStatus[(saved.status||status) as keyof typeof chatStatus]}${draft.detail?'\nรายละเอียด: '+draft.detail:''}\n\nข้อมูลได้รับการบันทึกและแสดงผลบนเว็บไซต์แล้ว${statusEmailText(saved.email_notification as {state?:string}|undefined)}`, [{type:'message',label:'เลือกผู้ประสานงาน',text:'MESS'},{type:'uri',label:'สแกนเอกสารส่งกลับ',uri:ORIGIN+'/api/line/start?next='+encodeURIComponent('/jobs/'+job.id+'?documents='+bl.id)}]);
  }
  const selection=postback.match(/^mess-select:([0-9a-f-]{36})$/);
  if(selection){
@@ -304,8 +304,15 @@ export async function onRequest({request,env}:Ctx){try{
     const result=await rpc(env,'impjo_invite',{p_actor:id,p_action:op,p_data:payload});
     return json(op==='create'?{...result,token}:result);
    }
+   if(requested==='reset_work'){
+    const id=await actor(request,env),input=(data.data||{}) as {bl_id?:string;confirmed?:boolean;expected_status?:string};
+    if(input.confirmed!==true)throw new ApiError('DOCUMENT_CONFIRM_REQUIRED',400);
+    const prepared=await rpc(env,'impjo_reset_report',{p_actor:id,p_action:'prepare',p_data:{bl_id:input.bl_id,confirmed:true,expected_status:input.expected_status}});
+    try{await deleteReportFiles(env,prepared.paths)}catch{return json({error:'REPORT_RESET_CLEANUP_PENDING'},503)}
+    return json(await rpc(env,'impjo_reset_report',{p_actor:id,p_action:'finish',p_data:{bl_id:input.bl_id,cleanup_id:prepared.cleanup_id}}));
+   }
    if(requested==='mess_finish'){
-    const id=await actor(request,env),input=(data.data||{}) as {bl_id?:string;status?:string;detail?:string;confirmed?:boolean;recipient_version?:string};
+    const id=await actor(request,env),input=(data.data||{}) as {bl_id?:string;status?:string;detail?:string;confirmed?:boolean;recipient_version?:string;document_id?:string};
     if(input.confirmed!==true)throw new ApiError('DOCUMENT_CONFIRM_REQUIRED',400);
     if(!['COMPLETED','ISSUE_REPORTED'].includes(input.status||''))throw new ApiError('INVALID_STATUS_TRANSITION',400);
     const context=await rpc(env,'impjo_documents',{p_actor:id,p_action:'context',p_data:{bl_id:input.bl_id}}) as unknown as {can_upload:boolean;recipient:{email:string;version:string}|null};
@@ -313,7 +320,7 @@ export async function onRequest({request,env}:Ctx){try{
     if(!emailConfigured(env))throw new ApiError('EMAIL_NOT_CONFIGURED',503);
     if(!context.recipient)throw new ApiError('DOCUMENT_RECIPIENT_REQUIRED',400);
     if(context.recipient.version!==input.recipient_version)throw new ApiError('DOCUMENT_RECIPIENT_CHANGED',400);
-    return json(await rpc(env,'impjo_api',{p_actor:id,p_action:'status',p_data:{bl_id:input.bl_id,status:input.status,detail:input.detail||'',expected_status:'IN_PROGRESS'}}));
+    return json(await rpc(env,'impjo_api',{p_actor:id,p_action:'status',p_data:{bl_id:input.bl_id,status:input.status,detail:input.detail||'',document_id:input.document_id,recipient_version:input.recipient_version,expected_status:'IN_PROGRESS'}}));
    }
    if(requested.startsWith('catalog_')){const op=requested.slice(8);if(!['list','save','archive'].includes(op))throw new ApiError('UNKNOWN_ACTION',404);return json(await rpc(env,'impjo_catalog_api',{p_actor:await actor(request,env),p_action:op,p_data:data.data||{}}));}
    if(['edit_job','archived_jobs','export_jobs'].includes(requested)){const id=await actor(request,env);return json(await rpc(env,'impjo_manage',{p_actor:id,p_action:requested,p_data:data.data||{}}));}

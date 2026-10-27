@@ -21,11 +21,10 @@ begin
  perform public.impjo_api(a,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));
  denied:=false;begin perform public.impjo_api(n,'status',jsonb_build_object('bl_id',b,'status','ISSUE_REPORTED','detail',' '));exception when invalid_parameter_value then denied:=true;end;assert denied,'Empty issue accepted';
  perform public.impjo_api(n,'status',jsonb_build_object('bl_id',b,'status','ISSUE_REPORTED','detail','QA issue'));
- assert exists(select 1 from public.impjo_events where target_id=b and actor_id=n and after_status='ISSUE_REPORTED'),'Second MESS audit actor missing';
+ assert exists(select 1 from public.impjo_events where target_id=b and actor_id=n and after_status='COMPLETED'),'Second MESS audit actor missing';assert (select status='COMPLETED' and report_outcome='ISSUE_REPORTED' and report_detail='QA issue' from public.impjo_bls where id=b),'Closed issue result missing';
  denied:=false;begin perform public.impjo_api(p,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));exception when insufficient_privilege then denied:=true;end;assert denied,'Pending MESS wrote work';
  update public.impjo_principals set state='DISABLED' where id=m;
  denied:=false;begin perform public.impjo_api(m,'detail',jsonb_build_object('id',j));exception when insufficient_privilege then denied:=true;end;assert denied,'Disabled MESS retained access';
 end $$;
 rollback;
 select 'PASS: shared MESS reporting without assignments, exact actor audit, no completed overwrite, required issue details and approval enforcement; fixtures rolled back' as result;
-
