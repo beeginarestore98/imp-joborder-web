@@ -1,11 +1,11 @@
 import {deliverStatusEmail,statusEmailText} from './status-email.ts';
-import{documentRequest,cleanupDocumentFiles}from'./documents.ts';
+import{documentRequest,cleanupDocumentFiles,emailConfigured}from'./documents.ts';
 import{operatorBrowse,operatorErrorMessage}from'./operator-chat.ts';
 import{messCard,type CardPresentation}from'./mess-card.ts';
 type Env={GMAIL_APP_PASSWORD?:string;DOCUMENT_FROM_EMAIL?:string;sendDocumentMail?:import("./documents.ts").DocumentEnv["sendDocumentMail"];SUPABASE_URL:string;SUPABASE_SERVICE_ROLE_KEY:string;SUPABASE_PUBLISHABLE_KEY:string;LINE_LOGIN_CHANNEL_ID:string;LINE_LOGIN_CHANNEL_SECRET:string;LIFF_ID:string;LINE_MESSAGING_CHANNEL_SECRET:string;LINE_MESSAGING_CHANNEL_ACCESS_TOKEN:string};
 type Ctx={request:Request;env:Env;params:Record<string,string|string[]>};
 const ORIGIN='https://imp-joborder-web.pages.dev';
-const loginReturn=(value:string|null)=>value==='/scan'||value==='/invite'||/^\/jobs\/[0-9a-f-]{36}(?:\?documents=[0-9a-f-]{36})?$/.test(value||'')?value!:'/portal';
+const loginReturn=(value:string|null)=>value==='/scan'||value==='/invite'||/^\/jobs\/[0-9a-f-]{36}(?:\?(?:documents|report)=[0-9a-f-]{36})?$/.test(value||'')?value!:'/portal';
 const cookie=(name:string,value:string,age:number)=>`__Host-impjo_${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${age}`;
 const json=(body:unknown,status=200,cookies:string[]=[])=>{const headers=new Headers({'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});for(const c of cookies)headers.append('Set-Cookie',c);return new Response(JSON.stringify(body),{status,headers})};
 class ApiError extends Error{status:number;constructor(message:string,status=400){super(message);this.status=status}}
@@ -80,7 +80,7 @@ export async function messChat(env:Env,event:ChatEvent){
  if(selection){
   const {job,bl}=await assignedBL(selection[1]);
   await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_INPUT_CLOSED',target_id:bl.id});
-  return workChat(job,bl,`${job.number}\n\nB/L: ${bl.number}\nสถานะ: ${chatStatus[bl.status]}${bl.status==='IN_PROGRESS'?(bl.can_report===true?'\nกรุณาเลือกรายงานผลการดำเนินงาน':'\nกรุณาโหลดรายการใหม่เพื่อตรวจสิทธิ์'):'\nอัปเดตได้เฉพาะงานที่กำลังดำเนินการ'}`,bl.status==='IN_PROGRESS'&&bl.can_report===true?[chatButton('เสร็จสมบูรณ์','mess-propose:COMPLETED:'+bl.id),chatButton('แจ้งปัญหา','mess-issue:'+bl.id)]:[]);
+  return workChat(job,bl,`${job.number}\n\nB/L: ${bl.number}\nสถานะ: ${chatStatus[bl.status]}\n\n${bl.status==='IN_PROGRESS'&&bl.can_report===true?'กดรายงานผลเพื่อยืนยันไม่มีปัญหา หรือระบุสาเหตุที่งานไม่สมบูรณ์ เมื่อยืนยันระบบจะส่งอีเมลให้เจ้าของงาน':'งานยังไม่พร้อมรายงานผล กรุณาตรวจสิทธิ์หรือโหลดรายการใหม่'}`,bl.status==='IN_PROGRESS'&&bl.can_report===true?[{type:'uri',label:'เสร็จสิ้น / รายงานผล',uri:ORIGIN+'/api/line/start?next='+encodeURIComponent('/jobs/'+job.id+'?report='+bl.id)}]:[]);
  }
  const issuePrompt=postback.match(/^mess-issue:([0-9a-f-]{36})$/);
  if(issuePrompt){const {bl}=await assignedBL(issuePrompt[1]);if(bl.status!=='IN_PROGRESS')return chatText('รายการนี้ไม่ได้อยู่ระหว่างดำเนินการแล้ว กรุณาพิมพ์ MESS เพื่อดูงานล่าสุด');await sb(env,'/rest/v1/impjo_events',{actor_id:actorId,action:'CHAT_EXPECT_ISSUE',target_id:bl.id});return chatText(`เลือกปัญหา\n\nB/L: ${bl.number}\nกดปัญหาเริ่มต้น หรือพิมพ์รายละเอียดอื่นได้ (ไม่เกิน 2,000 ตัวอักษร)\nระบบจะให้ยืนยันก่อนบันทึก ภายใน 10 นาที`,[chatButton('แจ้งวันนัดใหม่','mess-preset:RESCHEDULE:'+bl.id),chatButton('แก้ไขเอกสาร','mess-preset:DOCUMENT:'+bl.id),{type:'message',label:'ยกเลิก',text:'MESS'}])}
@@ -303,6 +303,17 @@ export async function onRequest({request,env}:Ctx){try{
     const payload=op==='create'?{hash:await digest(token!),kind:input.kind,role:input.role,label:input.label}:op==='redeem'?{hash:await digest(token!)}:{id:input.id};
     const result=await rpc(env,'impjo_invite',{p_actor:id,p_action:op,p_data:payload});
     return json(op==='create'?{...result,token}:result);
+   }
+   if(requested==='mess_finish'){
+    const id=await actor(request,env),input=(data.data||{}) as {bl_id?:string;status?:string;detail?:string;confirmed?:boolean;recipient_version?:string};
+    if(input.confirmed!==true)throw new ApiError('DOCUMENT_CONFIRM_REQUIRED',400);
+    if(!['COMPLETED','ISSUE_REPORTED'].includes(input.status||''))throw new ApiError('INVALID_STATUS_TRANSITION',400);
+    const context=await rpc(env,'impjo_documents',{p_actor:id,p_action:'context',p_data:{bl_id:input.bl_id}}) as unknown as {can_upload:boolean;recipient:{email:string;version:string}|null};
+    if(!context.can_upload)throw new ApiError('ACCESS_DENIED',403);
+    if(!emailConfigured(env))throw new ApiError('EMAIL_NOT_CONFIGURED',503);
+    if(!context.recipient)throw new ApiError('DOCUMENT_RECIPIENT_REQUIRED',400);
+    if(context.recipient.version!==input.recipient_version)throw new ApiError('DOCUMENT_RECIPIENT_CHANGED',400);
+    return json(await rpc(env,'impjo_api',{p_actor:id,p_action:'status',p_data:{bl_id:input.bl_id,status:input.status,detail:input.detail||'',expected_status:'IN_PROGRESS'}}));
    }
    if(requested.startsWith('catalog_')){const op=requested.slice(8);if(!['list','save','archive'].includes(op))throw new ApiError('UNKNOWN_ACTION',404);return json(await rpc(env,'impjo_catalog_api',{p_actor:await actor(request,env),p_action:op,p_data:data.data||{}}));}
    if(['edit_job','archived_jobs','export_jobs'].includes(requested)){const id=await actor(request,env);return json(await rpc(env,'impjo_manage',{p_actor:id,p_action:requested,p_data:data.data||{}}));}
