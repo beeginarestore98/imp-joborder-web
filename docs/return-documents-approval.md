@@ -1,0 +1,15 @@
+# Returned documents: Gmail email-only delivery
+
+Implemented 2026-10-27 with owner approval. MESS scans the existing Job Order QR, updates a B/L, then optionally captures returned-document photos. Preview, add, remove, rotate and reorder up to 10 pages / 5 MB before reviewing the combined PDF and explicitly submitting it. Only reviewed JPEG page data is uploaded; the backend independently validates/rebuilds the PDF. Originals are not public. No Teams or Power Automate integration is used.
+
+Persistence: impjo_document_recipients, impjo_return_documents and impjo_document_deliveries; service-only impjo_documents RPC; private impjo-return-documents bucket. RLS is enabled and anon/authenticated SQL grants are revoked. Existing storage policies apply only to the legacy imp-documents bucket. The API checks live app sessions and approved roles. Only LINE MESS uploads; authorized job viewers can read documents through an authenticated endpoint; only STAFF ADMIN configures recipient emails by Contact Name. Recipient changes invalidate an old confirmation. Existing work status permissions remain unchanged.
+
+Gmail transport: Nodemailer 10.2.1 pinned in the Edge entrypoint, smtp.gmail.com:465, implicit TLS with certificate verification, bounded timeouts, no SMTP logging and no file/URL attachment resolution. Backend-only secrets DOCUMENT_FROM_EMAIL and GMAIL_APP_PASSWORD are required. Never use a normal Gmail password or VITE_* variables. The owner must enable 2-Step Verification and create/store the dedicated Google App Password themselves; do not send credentials in chat. Actual SMTP operation on the deployed Edge must be verified with an owner-approved recipient after secrets are entered. Readiness means configured, not proof of delivery.
+
+SMTP acceptance is recorded as ACCEPTED, not inbox delivery or reading. UNKNOWN (network/ambiguous response) and SENDING are never blindly retried. A persisted lease prevents simultaneous sends. Stable Message-ID aids tracing but is not claimed to be SMTP idempotency. An explicit SMTP authentication or 5xx rejection records FAILED. No background sending schedule is added. Gmail's own quota applies.
+
+Permanent Job deletion cascades document metadata and delivery records, then attempts private-file cleanup through the backend. Any cleanup failure records DOCUMENT_FILE_CLEANUP_PENDING; administrators must reconcile that audit entry. An upload whose final authorization fails attempts to remove its own newly uploaded PDF. No bucket or old RLS settings are weakened.
+
+Verified: TypeScript, production build, 89 Node tests, SQL integration tests with rolled-back fixtures (role boundaries, recipient snapshots, one email channel, replay and disabled-user denial, deletion compatibility). Synthetic portrait/landscape PDF parsed and rendered with pypdf/Poppler. Full camera/mobile interaction and real SMTP delivery remain to be verified with the owner; no email has been sent during implementation.
+
+References: https://support.google.com/accounts/answer/185833 ; https://nodemailer.com/smtp ; https://supabase.com/docs/guides/functions/limits

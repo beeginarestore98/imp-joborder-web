@@ -1,6 +1,7 @@
+import{documentRequest,cleanupDocumentFiles}from'./documents.ts';
 import{operatorBrowse,operatorErrorMessage}from'./operator-chat.ts';
 import{messCard,type CardPresentation}from'./mess-card.ts';
-type Env={SUPABASE_URL:string;SUPABASE_SERVICE_ROLE_KEY:string;SUPABASE_PUBLISHABLE_KEY:string;LINE_LOGIN_CHANNEL_ID:string;LINE_LOGIN_CHANNEL_SECRET:string;LIFF_ID:string;LINE_MESSAGING_CHANNEL_SECRET:string;LINE_MESSAGING_CHANNEL_ACCESS_TOKEN:string};
+type Env={GMAIL_APP_PASSWORD?:string;DOCUMENT_FROM_EMAIL?:string;sendDocumentMail?:import("./documents.ts").DocumentEnv["sendDocumentMail"];SUPABASE_URL:string;SUPABASE_SERVICE_ROLE_KEY:string;SUPABASE_PUBLISHABLE_KEY:string;LINE_LOGIN_CHANNEL_ID:string;LINE_LOGIN_CHANNEL_SECRET:string;LIFF_ID:string;LINE_MESSAGING_CHANNEL_SECRET:string;LINE_MESSAGING_CHANNEL_ACCESS_TOKEN:string};
 type Ctx={request:Request;env:Env;params:Record<string,string|string[]>};
 const ORIGIN='https://imp-joborder-web.pages.dev';
 const loginReturn=(value:string|null)=>value==='/scan'||value==='/invite'?value:'/portal';
@@ -15,7 +16,7 @@ async function sb(env:Env,path:string,body?:unknown,auth?:string,method?:string)
  else if(key?.startsWith('eyJ'))headers.Authorization=`Bearer ${key}`;
  const response=await fetch(`${env.SUPABASE_URL}${path}`,{method:method||(body===undefined?'GET':'POST'),headers,body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
  const raw=await response.text();const data=(raw?JSON.parse(raw):{}) as Record<string,unknown>;
- if(!response.ok){const code=String(data.code||'');const known=['INVALID_SEARCH_FILTER','ACCOUNT_DELETED','ACCOUNT_DELETE_PENDING','INVITE_UNAVAILABLE','INVALID_INVITE','INVITE_WRONG_ACCOUNT','INVITE_ACCOUNT_HAS_ROLE','INVALID_EMAIL_CODE','AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG','INVALID_JOB_DATE','AMOUNT_REQUIRED','INVALID_AMOUNT','INVALID_CATALOG','STALE_JOB','STALE_STATUS','JOB_ARCHIVED','BL_REMOVAL_NOT_ALLOWED','INVALID_DATE_RANGE','EXPORT_TOO_LARGE','INVALID_RECIPIENT','CHAT_EXPIRED','BATCH_LIMIT','INVALID_BATCH'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')||code==='28000'?401:code==='42501'?403:code==='P0002'?404:400)}
+ if(!response.ok){const code=String(data.code||'');const known=['INVALID_SEARCH_FILTER','ACCOUNT_DELETED','ACCOUNT_DELETE_PENDING','INVITE_UNAVAILABLE','INVALID_INVITE','INVITE_WRONG_ACCOUNT','INVITE_ACCOUNT_HAS_ROLE','INVALID_EMAIL_CODE','AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG','INVALID_JOB_DATE','AMOUNT_REQUIRED','INVALID_AMOUNT','INVALID_CATALOG','STALE_JOB','STALE_STATUS','JOB_ARCHIVED','BL_REMOVAL_NOT_ALLOWED','INVALID_DATE_RANGE','EXPORT_TOO_LARGE','DOCUMENT_NOT_READY','DOCUMENT_RECIPIENT_REQUIRED','DOCUMENT_RECIPIENT_CHANGED','DOCUMENT_CONFLICT','INVALID_DELIVERY_STATE','INVALID_RECIPIENT','CHAT_EXPIRED','BATCH_LIMIT','INVALID_BATCH'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')||code==='28000'?401:code==='42501'?403:code==='P0002'?404:400)}
  return data;
 }
 const rpc=(env:Env,name:string,data:unknown)=>sb(env,`/rest/v1/rpc/${name}`,data);
@@ -226,6 +227,7 @@ async function webhook(request:Request,env:Env){
 export async function onRequest({request,env}:Ctx){try{
  const url=new URL(request.url);const path=url.pathname.replace(/^\/api\/?/,'');
  if(!env.SUPABASE_URL||!env.SUPABASE_SERVICE_ROLE_KEY||!env.SUPABASE_PUBLISHABLE_KEY)return json({error:'SETUP_REQUIRED'},503);
+ if(path.startsWith('documents/')){if(request.method!=='GET'&&(request.headers.get('origin')!==ORIGIN||request.headers.get('x-imp-client')!=='web'))return json({error:'ORIGIN_DENIED'},403);const id=await actor(request,env);return await documentRequest(request,path,env,(action,data)=>rpc(env,'impjo_documents',{p_actor:id,p_action:action,p_data:data}));}
  if(path==='line/start'&&request.method==='GET'){
   if(!env.LINE_LOGIN_CHANNEL_ID||!env.LINE_LOGIN_CHANNEL_SECRET)throw new ApiError('LINE_NOT_CONFIGURED',503);
   const state=random(),nonce=random(),verifier=random();const bytes=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier)));const challenge=btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
@@ -275,7 +277,7 @@ export async function onRequest({request,env}:Ctx){try{
   if(path==='action'){
    const requested=String(data.action||'');
    if(requested==='search_jobs')return json(await rpc(env,'impjo_search_jobs',{p_actor:await actor(request,env),p_data:data.data||{}}));
-   if(requested==='delete_job'){const input=data.data&&typeof data.data==='object'?data.data as Record<string,unknown>:{};return json(await rpc(env,'impjo_delete_job',{p_actor:await actor(request,env),p_id:input.id,p_version:input.version}));}
+   if(requested==='delete_job'){const input=data.data&&typeof data.data==='object'?data.data as Record<string,unknown>:{};const id=await actor(request,env);const result=await rpc(env,'impjo_delete_job',{p_actor:id,p_id:input.id,p_version:input.version});try{await cleanupDocumentFiles(env,String(input.id))}catch{await sb(env,'/rest/v1/impjo_events',{actor_id:id,action:'DOCUMENT_FILE_CLEANUP_PENDING',target_id:input.id});return json({...result,document_cleanup_pending:true})}return json(result);}
    if(requested==='delete_account'||requested==='account_deletion_list'){
     const id=await actor(request,env);const input=data.data&&typeof data.data==='object'?data.data as Record<string,unknown>:{};
     if(requested==='account_deletion_list')return json(await rpc(env,'impjo_account_admin',{p_actor:id,p_action:'list',p_target:null}));
