@@ -13,6 +13,7 @@ export async function documentRequest(request:Request,path:string,env:DocumentEn
  const ready=emailConfigured(env),url=new URL(request.url);
  try{
   if(request.method==='GET'){
+   if(path==='documents/contacts')return response({...await call('contacts_list',{q:url.searchParams.get('q')||'',page:url.searchParams.get('page')||1}),integration_ready:ready});
    if(path==='documents/recipients')return response({...await call('recipients',{}),integration_ready:ready});
    if(path==='documents/context')return response({...await call('context',{bl_id:url.searchParams.get('bl_id')}),integration_ready:ready});
    const match=path.match(/^documents\/([0-9a-f-]{36})\/file$/);
@@ -20,6 +21,8 @@ export async function documentRequest(request:Request,path:string,env:DocumentEn
   }
   if(request.method!=='POST')return response({error:'NOT_FOUND'},404);
   const data=await documentBody(request);
+  if(path==='documents/contacts')return response(await call('contacts_save',data));
+  if(path==='documents/contacts/delete')return response(await call('contacts_delete',data));
   if(path==='documents/recipients')return response(await call('recipient_save',data));
   if(path==='documents/recipients/delete')return response(await call('recipient_delete',data));
   if(path==='documents/upload'){
