@@ -1,0 +1,9 @@
+# MESS status email reports
+
+Enabled with owner approval on 2026-10-27. A confirmed MESS COMPLETED or ISSUE_REPORTED status event atomically creates one private notification row. The backend sends a Gmail status email to the enabled recipient configured for the Job Contact Name, even with no document. Issue emails require and include the confirmed issue reason. Email details include Job/B-L, job date, destination, HBL, consignee and reporter when present. OPERATOR/OUTSOURCE updates do not generate MESS report emails.
+
+Status is committed independently of SMTP delivery. Atomic event linkage, a unique event key and claim lease prevent replay/concurrent send duplication. Missing recipient/configuration and recipient changes stop sending and produce an explicit LINE/web notice. SMTP acceptance is ACCEPTED, not a claim of inbox delivery. Ambiguous responses remain UNKNOWN; there is no automatic retry or report scheduler. Inspect the backend notification record and sender mailbox before any manual resend. Gmail quota remains the existing account quota.
+
+Returned PDFs keep their own preview and confirmation. Their emails now include current B/L status and issue reason. The LINE success card links through the normal server-verified LINE Login to the exact Job and document accordion; redirect targets only match allowlisted local UUID routes. No new login scopes, credentials, push messages, Teams integration or paid service.
+
+impjo_status_notifications is service-only with RLS and revoked anon/authenticated grants. Notification claims require the original approved MESS or staff ADMIN; current recipient snapshot is rechecked. Audit records retain the status actor and email outcome. Job deletion cascades notification rows. No actual business status or email was changed/sent during SQL rollback tests.

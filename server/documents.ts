@@ -49,7 +49,7 @@ export async function documentRequest(request:Request,path:string,env:DocumentEn
     let state='UNKNOWN',provider_id='',error='DELIVERY_UNCONFIRMED';
     try{
      const pdf=await storedFile(env,claim.path);const key=data.id+':'+channel;
-     const result=await env.sendDocumentMail!({to:claim.recipient,jobNumber:claim.job_number,blNumber:claim.bl_number,contact:claim.contact,documentId:data.id,pdfBase64:base64(pdf)});
+     const result=await env.sendDocumentMail!({to:claim.recipient,jobNumber:claim.job_number,blNumber:claim.bl_number,contact:claim.contact,documentId:data.id,pdfBase64:base64(pdf),status:claim.status,issueDetail:claim.issue_detail,reporter:claim.reporter,destination:claim.destination,hbl:claim.hbl,consignee:claim.consignee,jobDate:claim.job_date});
      provider_id=result.providerId;state=result.state;error='';
 // Any network/ambiguous reply stays UNKNOWN; never blindly resend a potentially delivered file.
     }catch(e){if((e as Error).message==='EMAIL_PROVIDER_REJECTED'){state='FAILED';error='EMAIL_PROVIDER_REJECTED'}/* Unknown delivery must not be automatically retried. */}

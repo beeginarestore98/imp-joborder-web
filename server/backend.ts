@@ -1,10 +1,11 @@
+import {deliverStatusEmail,statusEmailText} from './status-email.ts';
 import{documentRequest,cleanupDocumentFiles}from'./documents.ts';
 import{operatorBrowse,operatorErrorMessage}from'./operator-chat.ts';
 import{messCard,type CardPresentation}from'./mess-card.ts';
 type Env={GMAIL_APP_PASSWORD?:string;DOCUMENT_FROM_EMAIL?:string;sendDocumentMail?:import("./documents.ts").DocumentEnv["sendDocumentMail"];SUPABASE_URL:string;SUPABASE_SERVICE_ROLE_KEY:string;SUPABASE_PUBLISHABLE_KEY:string;LINE_LOGIN_CHANNEL_ID:string;LINE_LOGIN_CHANNEL_SECRET:string;LIFF_ID:string;LINE_MESSAGING_CHANNEL_SECRET:string;LINE_MESSAGING_CHANNEL_ACCESS_TOKEN:string};
 type Ctx={request:Request;env:Env;params:Record<string,string|string[]>};
 const ORIGIN='https://imp-joborder-web.pages.dev';
-const loginReturn=(value:string|null)=>value==='/scan'||value==='/invite'?value:'/portal';
+const loginReturn=(value:string|null)=>value==='/scan'||value==='/invite'||/^\/jobs\/[0-9a-f-]{36}(?:\?documents=[0-9a-f-]{36})?$/.test(value||'')?value!:'/portal';
 const cookie=(name:string,value:string,age:number)=>`__Host-impjo_${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${age}`;
 const json=(body:unknown,status=200,cookies:string[]=[])=>{const headers=new Headers({'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});for(const c of cookies)headers.append('Set-Cookie',c);return new Response(JSON.stringify(body),{status,headers})};
 class ApiError extends Error{status:number;constructor(message:string,status=400){super(message);this.status=status}}
@@ -19,7 +20,7 @@ async function sb(env:Env,path:string,body?:unknown,auth?:string,method?:string)
  if(!response.ok){const code=String(data.code||'');const known=['INVALID_SEARCH_FILTER','ACCOUNT_DELETED','ACCOUNT_DELETE_PENDING','INVITE_UNAVAILABLE','INVALID_INVITE','INVITE_WRONG_ACCOUNT','INVITE_ACCOUNT_HAS_ROLE','INVALID_EMAIL_CODE','AUTH_REQUIRED','APPROVAL_REQUIRED','ACCESS_DENIED','NOT_FOUND','INVALID_BL_LIST','INVALID_ROLE','CANNOT_CHANGE_SELF','INVALID_IDENTITY_ROLE','ASSIGNEE_NOT_APPROVED','INVALID_STATUS_TRANSITION','ISSUE_DETAIL_REQUIRED','DETAIL_TOO_LONG','INVALID_JOB_DATE','AMOUNT_REQUIRED','INVALID_AMOUNT','INVALID_CATALOG','STALE_JOB','STALE_STATUS','JOB_ARCHIVED','BL_REMOVAL_NOT_ALLOWED','INVALID_DATE_RANGE','EXPORT_TOO_LARGE','DOCUMENT_NOT_READY','DOCUMENT_RECIPIENT_REQUIRED','DOCUMENT_RECIPIENT_CHANGED','DOCUMENT_CONFLICT','INVALID_DELIVERY_STATE','INVALID_RECIPIENT','CHAT_EXPIRED','BATCH_LIMIT','INVALID_BATCH'];const msg=String(data.message||'');throw new ApiError(known.includes(msg)?msg:code==='23505'?'DUPLICATE_RECORD':path.startsWith('/auth/')?'AUTH_FAILED':'DATABASE_REQUEST_FAILED',path.startsWith('/auth/')||code==='28000'?401:code==='42501'?403:code==='P0002'?404:400)}
  return data;
 }
-const rpc=(env:Env,name:string,data:unknown)=>sb(env,`/rest/v1/rpc/${name}`,data);
+async function rpc(env:Env,name:string,data:unknown){const result=await sb(env,`/rest/v1/rpc/${name}`,data);const args=data as {p_action?:string;p_actor?:string};if(name==='impjo_api'&&args.p_action==='status'&&typeof result.notification_id==='string'){try{result.email_notification=await deliverStatusEmail(env,result.notification_id,(action,p_data)=>sb(env,'/rest/v1/rpc/impjo_status_mail',{p_actor:args.p_actor,p_action:action,p_data}))}catch{result.email_notification={state:'ERROR'}}}return result;}
 const random=()=>Array.from(crypto.getRandomValues(new Uint8Array(32))).map(v=>v.toString(16).padStart(2,'0')).join('');
 function sessionId(token:string){try{const payload=JSON.parse(atob(token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));if(typeof payload.session_id==='string')return payload.session_id}catch{/* Token validity is checked by Supabase Auth first. */}throw new ApiError('AUTH_REQUIRED',401)}
 async function lineSession(env:Env,subject:string){const session=random();const id=await rpc(env,'impjo_line_session',{p_subject:subject,p_hash:await digest(session)});return{session,id}}
@@ -72,8 +73,8 @@ export async function messChat(env:Env,event:ChatEvent){
   const {job,bl}=await assignedBL(draft.target_id);
   if(bl.status!=='IN_PROGRESS')return chatText(`B/L ${bl.number} มีสถานะ ${chatStatus[bl.status]} แล้ว ไม่มีการบันทึกซ้ำ\nพิมพ์ MESS เพื่อดูงานล่าสุด`);
   const status=draft.action.slice('CHAT_PROPOSE_'.length);
-  await call('status',{bl_id:bl.id,status,detail:draft.detail});
-  return workChat(job,{...bl,status},`บันทึกสำเร็จ\n\nงาน: ${job.number}\nB/L: ${bl.number}\nสถานะ: ${chatStatus[status]}${draft.detail?'\nรายละเอียด: '+draft.detail:''}\n\nข้อมูลได้รับการบันทึกและแสดงผลบนเว็บไซต์แล้ว`,[{type:'message',label:'เลือกผู้ประสานงาน',text:'MESS'},{type:'uri',label:'เปิดบนเว็บ',uri:ORIGIN+'/jobs/'+job.id}]);
+  const saved=await call('status',{bl_id:bl.id,status,detail:draft.detail});
+  return workChat(job,{...bl,status},`บันทึกสำเร็จ\n\nงาน: ${job.number}\nB/L: ${bl.number}\nสถานะ: ${chatStatus[status]}${draft.detail?'\nรายละเอียด: '+draft.detail:''}\n\nข้อมูลได้รับการบันทึกและแสดงผลบนเว็บไซต์แล้ว${statusEmailText(saved.email_notification as {state?:string}|undefined)}`, [{type:'message',label:'เลือกผู้ประสานงาน',text:'MESS'},{type:'uri',label:'สแกนเอกสารส่งกลับ',uri:ORIGIN+'/api/line/start?next='+encodeURIComponent('/jobs/'+job.id+'?documents='+bl.id)}]);
  }
  const selection=postback.match(/^mess-select:([0-9a-f-]{36})$/);
  if(selection){
