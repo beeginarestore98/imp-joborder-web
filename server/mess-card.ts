@@ -1,5 +1,5 @@
 export type CardAction={type:string;label?:string;data?:string;text?:string;uri?:string};
-export type WorkItem={jobNumber:string;blNumber:string;status:string;jobDate?:string|null;contact?:string;destination?:string;purpose?:string;amount?:number|null;action?:CardAction};
+export type WorkItem={jobNumber:string;blNumber:string;status:string;jobDate?:string|null;contact?:string;destination?:string;hbl?:string;consignee?:string;purpose?:string;amount?:number|null;action?:CardAction};
 export type CardPresentation={role?:string;summary?:string;items?:WorkItem[];current?:WorkItem;nextStatus?:string};
 type ChatMessage={type:string;text:string;quickReply?:{items:{action:unknown}[]};presentation?:CardPresentation};
 const yellow='#FFCC00',black='#171717',red='#C71920',white='#FFFFFF',gray='#E7E7E2';
@@ -30,7 +30,9 @@ function itemBody(item:WorkItem){return[
  {...text(item.jobNumber,'sm','#6B5700'),weight:'bold'},text('B/L','xs','#666666'),{...text(item.blNumber,'lg'),weight:'bold'},
  ...(item.jobDate?[text('วันที่งาน: '+formatDate(item.jobDate),'xs','#666666')]:[]),
  ...(item.contact?[text('Contact Name: '+item.contact,'sm')]:[]),
- ...(item.destination?[text('Destination: '+item.destination,'sm')]:[]),
+ ...(item.destination!==undefined?[text('Destination: '+(item.destination||'—'),'sm')]:[]),
+ ...(item.hbl!==undefined?[text('HBL Number: '+(item.hbl||'—'),'sm')]:[]),
+ ...(item.consignee!==undefined?[text('Consignee: '+(item.consignee||'—'),'sm')]:[]),
  ...(item.purpose?[text('วัตถุประสงค์: '+item.purpose,'sm')]:[]),
  ...(item.amount!=null?[text('ยอดเงิน: '+Number(item.amount).toLocaleString('th-TH')+' บาท','sm')]:[]),
  {type:'box',layout:'vertical',backgroundColor:item.status==='ISSUE_REPORTED'?'#FFF0F0':item.status==='COMPLETED'?black:'#FFF6CE',paddingAll:'10px',cornerRadius:'6px',contents:[{...text(labels[item.status]||'ไม่ทราบสถานะ','sm',item.status==='ISSUE_REPORTED'?red:item.status==='COMPLETED'?white:black),weight:'bold'}]},
