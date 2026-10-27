@@ -1,0 +1,2 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {validContactPhone} from '../shared/contact-phone.ts';
+test('contact phone rejects names and permits formatted numbers',()=>{for(const s of ['Ongpisut','Panisa','','123','081abc1234'])assert.equal(validContactPhone(s),false,s);for(const s of ['0812345678','02-123-4567','+66 81 234 5678']){assert.equal(validContactPhone(s),true,s)}});
