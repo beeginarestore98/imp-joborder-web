@@ -31,7 +31,9 @@ begin
  perform public.impjo_api(o,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));
  perform public.impjo_api(o,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));
  perform public.impjo_api(o,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));
- denied:=false;begin perform public.impjo_api(x,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));exception when insufficient_privilege then denied:=true;end;assert denied,'Other MESS changed work';
+ perform public.impjo_api(x,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));
+ assert exists(select 1 from public.impjo_events where actor_id=x and target_id=b and after_status='COMPLETED'),'Shared MESS actor audit missing';
+ perform public.impjo_api(o,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));
  denied:=false;begin perform public.impjo_api(m,'status',jsonb_build_object('bl_id',b,'status','ISSUE_REPORTED','detail',' '));exception when invalid_parameter_value then denied:=true;end;assert denied,'Empty issue accepted';
  perform public.impjo_api(m,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));
  assert exists(select 1 from public.impjo_events where actor_id=m and target_id=b and after_status='COMPLETED'),'Actor audit missing';
@@ -44,5 +46,4 @@ begin
  assert not has_function_privilege('authenticated','public.impjo_api(uuid,text,jsonb)','EXECUTE'),'authenticated can impersonate actor';
 end $$;
 rollback;
-select 'PASS: assignment isolation, role transitions, issue requirement, audit actor, revocation, no anon/direct RPC access. All test records rolled back.' as result;
-
+select 'PASS: approved shared MESS/OUTSOURCE workflows, role transitions, issue requirement, audit actor, revocation, no anon/direct RPC access. All test records rolled back.' as result;

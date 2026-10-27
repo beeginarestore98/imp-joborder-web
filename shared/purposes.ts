@@ -1,2 +1,3 @@
 export function splitPurposes(value:string){return [...new Set(value.split('\n').map(x=>x.trim()).filter(Boolean))]}
 export function joinPurposes(values:string[]){const result=[...new Set(values.map(x=>x.trim()).filter(Boolean))].join('\n');if(result.length>250)throw Error('วัตถุประสงค์ที่เลือกรวมกันต้องไม่เกิน 250 ตัวอักษร');return result}
+export function purposeRequiresAmount(selected:string[],catalog:{name:string;requires_amount:boolean}[]){return selected.some(name=>catalog.some(p=>p.name===name&&p.requires_amount)||['ตามใบมัดจำตู้','ตามใบเสร็จ'].includes(name))}

@@ -21,8 +21,9 @@ begin
  result:=public.impjo_api(o,'detail',jsonb_build_object('id',j));
  assert (result->'jobs'->0->'bls'->0->>'can_update')::boolean,'Assigned OUTSOURCE capability absent';
  result:=public.impjo_api(x,'detail',jsonb_build_object('id',j));
- assert not (result->'jobs'->0->'bls'->0->>'can_update')::boolean,'Other OUTSOURCE capability leaked';
- denied:=false;begin perform public.impjo_api(x,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));exception when insufficient_privilege then denied:=true;end;assert denied,'Unassigned OUTSOURCE reopened work';
+ assert (result->'jobs'->0->'bls'->0->>'can_update')::boolean,'Approved shared OUTSOURCE capability missing';
+ perform public.impjo_api(x,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));
+ perform public.impjo_api(x,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));
  denied:=false;begin perform public.impjo_api(m,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS'));exception when insufficient_privilege then denied:=true;end;assert denied,'MESS reopened completed work';
  denied:=false;begin perform public.impjo_api(a,'status',jsonb_build_object('bl_id',b,'status','ISSUE_REPORTED'));exception when invalid_parameter_value then denied:=true;end;assert denied,'Issue without details accepted';
  denied:=false;begin perform public.impjo_api(a,'status',jsonb_build_object('bl_id',b,'status','IN_PROGRESS','expected_status','PENDING_HANDOVER'));exception when invalid_parameter_value then denied:=true;end;assert denied,'Stale confirmation overwrote newer status';
@@ -33,4 +34,3 @@ begin
 end $$;
 rollback;
 select 'PASS: OPERATOR and assigned OUTSOURCE all statuses, reopening, immutable audit, MESS boundary, required issue details, stale-write rejection; all fixtures rolled back' as result;
-

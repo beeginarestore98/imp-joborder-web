@@ -13,10 +13,11 @@ begin
  assert public.impjo_visible_bl(m,b),'Unassigned approved MESS cannot view shared job';
  result:=public.impjo_mess_browse(m,jsonb_build_object('mode','bls','contact_key',j,'page',1));
  assert (result->>'total')::int=12 and jsonb_array_length(result->'bls')=5,'BL pagination count incorrect';
- assert not (result->'bls'->0->>'can_report')::boolean,'Read access incorrectly granted status-write capability';
+ assert (result->'bls'->0->>'can_report')::boolean,'Approved shared MESS reporting capability missing';
  result:=public.impjo_mess_browse(m,jsonb_build_object('mode','bls','contact_key',j,'page',3));
  assert jsonb_array_length(result->'bls')=2,'Last BL page lost records';
- denied:=false;begin perform public.impjo_api(m,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));exception when insufficient_privilege then denied:=true;end;assert denied,'Unassigned MESS changed shared work';
+ perform public.impjo_api(m,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));
+ update public.impjo_bls set status='IN_PROGRESS' where id=b; -- Reset fixture for the next independent reporting assertion.
  perform public.impjo_api(a,'assign',jsonb_build_object('bl_id',b,'role','MESS','principal_id',m));
  perform public.impjo_api(m,'status',jsonb_build_object('bl_id',b,'status','COMPLETED'));
  assert exists(select 1 from public.impjo_events where actor_id=m and target_id=b and after_status='COMPLETED'),'Mapped actor audit missing';
@@ -31,5 +32,4 @@ begin
  assert not has_function_privilege('authenticated','public.impjo_mess_browse(uuid,jsonb)','EXECUTE'),'Direct actor impersonation possible';
 end $$;
 rollback;
-select 'PASS: shared MESS reads, contact/BL pagination, assignment-bound writes, date/archive filtering and private RPC; all fixtures rolled back' as result;
-
+select 'PASS: shared MESS reads, contact/BL pagination, approved shared writes, date/archive filtering and private RPC; all fixtures rolled back' as result;

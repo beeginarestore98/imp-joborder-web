@@ -1,2 +1,4 @@
-import {test} from 'node:test';import assert from 'node:assert/strict';import {splitPurposes,joinPurposes} from '../shared/purposes.ts';
+import {test} from 'node:test';import assert from 'node:assert/strict';import {splitPurposes,joinPurposes,purposeRequiresAmount} from '../shared/purposes.ts';
 test('multiple purposes roundtrip without changing legacy single purpose',()=>{assert.deepEqual(splitPurposes('รับ D/O'),['รับ D/O']);const values=['รับ D/O','ตามใบเสร็จ'];assert.deepEqual(splitPurposes(joinPurposes(values)),values);assert.equal(joinPurposes([' A ','A','B']),'A\nB');assert.throws(()=>joinPurposes(['x'.repeat(251)]),/250/)});
+
+test('archived custom purpose metadata still requires money when editing a historical job',()=>{const archived={name:'CUSTOM MONEY',requires_amount:true,archived_at:'2026-10-27'};assert.equal(purposeRequiresAmount(['CUSTOM MONEY'],[archived]),true);assert.equal(purposeRequiresAmount(['รับ D/O'],[archived]),false);assert.equal(purposeRequiresAmount(['รับ D/O','CUSTOM MONEY'],[archived]),true)});
